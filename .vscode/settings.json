@@ -51,6 +51,15 @@
 			"es6": true
 		}
 	},
-	"cSpell.words": ["Healthcheck"],
-	"cSpell.ignorePaths": ["scratch/**", "**/*.log", "**/*.psv", "node_modules/**", ".git/**", ".gitignore", "./.vscode/**", "package-lock.json", "yarn.lock"]
+	"cSpell.words": ["Gameday", "Healthcheck", "materialised"],
+	"cSpell.ignorePaths": ["scratch/**", "**/*.log", "**/*.psv", "node_modules/**", ".git/**", ".gitignore", "./.vscode/**", "package-lock.json", "yarn.lock"],
+	"files.associations": {
+		"*.jsonc": "jsonc",
+		"*.json5": "json5"
+	},
+	"jest.outputConfig": {
+		"revealOn": "run",
+		"revealWithFocus": "test-results",
+		"clearOnRun": "none"
+	}
 }

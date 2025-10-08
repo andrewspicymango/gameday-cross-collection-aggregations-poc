@@ -93,8 +93,52 @@ const closeMongo = async function (mongo) {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+/**
+ * Check if a collection exists in the MongoDB instance.
+ *
+ * @async
+ * @param {Object} mongo - Mongo connection object containing client and dbName properties
+ * @param {MongoClient} mongo.client - Connected MongoDB client instance
+ * @param {string} collectionName - Name of the collection to check for existence
+ * @returns {Promise<boolean>} Resolves to true if collection exists, false otherwise
+ * @throws {Error} Throws error if the operation fails
+ */
+const collectionExists = async function (mongo, collectionName) {
+	if (!collectionName || collectionName.length === 0) {
+		throw new Error('collectionName is required');
+	}
+	const collections = await mongo.db.listCollections({}, { nameOnly: true }).toArray();
+	return collections.some((col) => col.name === collectionName);
+};
+
+////////////////////////////////////////////////////////////////////////////////
+/**
+ * Check if an index exists on a collection in the MongoDB instance.
+ *
+ * @async
+ * @param {Object} mongo - Mongo connection object containing client and dbName properties
+ * @param {MongoClient} mongo.client - Connected MongoDB client instance
+ * @param {string} collectionName - Name of the collection to check for the index
+ * @param {string} indexName - Name of the index to check for existence
+ * @returns {Promise<boolean>} Resolves to true if index exists, false otherwise
+ * @throws {Error} Throws error if the operation fails
+ */
+const indexExistsOnCollection = async function (mongo, collectionName, indexName) {
+	if (!collectionName || collectionName.length === 0) {
+		throw new Error('collectionName is required');
+	}
+	if (!indexName || indexName.length === 0) {
+		throw new Error('indexName is required');
+	}
+	const indexes = await mongo.db.collection(collectionName).indexes();
+	return indexes.some((idx) => idx.name === indexName);
+};
+
+////////////////////////////////////////////////////////////////////////////////
 module.exports = {
 	connectToMongo,
 	closeMongo,
 	dbExists,
+	collectionExists,
+	indexExistsOnCollection,
 };

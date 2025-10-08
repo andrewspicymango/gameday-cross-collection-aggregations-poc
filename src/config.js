@@ -1,5 +1,7 @@
 require('dotenv').config({ quiet: true });
 
+// 'bblapi/2023:BBL',
+// fifa/1jt5mxgn4q5r6mknmlqv5qjh0
 module.exports = {
 	log: {
 		writeToFile: true,
@@ -11,6 +13,9 @@ module.exports = {
 		db: null,
 		url: process.env.MONGOURL || null,
 		dbName: process.env.MONGODB || 'gameday',
+		matAggCollectionName: process.env.MAT_AGG_COLLECTION_NAME || 'materialisedAggregations',
+		matAggIndexIdAndScope: process.env.MAT_AGG_INDEX_ID_AND_SCOPE || { resourceType: 1, _externalIdScope: 1, _externalId: 1, targetType: 1 },
+		matAggIndexIdAndScopeName: process.env.MAT_AGG_INDEX_ID_AND_SCOPE_NAME || 'resourceType_1__externalIdScope_1__externalId_1_targetType_1', // Name of the index created on the matAggCollectionName
 	},
 	aws: {
 		region: process.env.AWS_REGION || 'eu-west-1',

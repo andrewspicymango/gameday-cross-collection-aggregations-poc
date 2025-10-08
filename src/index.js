@@ -3,7 +3,7 @@ const _ = require(`lodash`);
 const express = require('express');
 const cors = require('cors');
 const uuid = require(`uuid`);
-const { closeMongo, connectToMongo } = require('./utils/mongoUtils');
+const { closeMongo, connectToMongo, collectionExists, indexExistsOnCollection } = require('./utils/mongoUtils');
 const { normalizePort } = require('./utils/generalUtils');
 const { setLogLevel, warn, error, info, debug, logAndThrowError } = require('./log.js');
 const { send200, send400, send401, send404, send500, sendError } = require('./utils/httpResponseUtils');
@@ -12,6 +12,7 @@ const { send200, send400, send401, send404, send500, sendError } = require('./ut
 // Routes
 const healthcheckRoutes = require('./routes/healthcheckRouter.js');
 const logRoutes = require('./routes/logRouter.js');
+const gamedayDataRouter = require('./routes/gamedayDataRouter.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -82,9 +83,29 @@ async function main() {
 			setLogLevel('info');
 		}
 
+		config.cwd = process.cwd();
 		config.express.port = normalizePort(config?.express?.port);
 		info(`Trying to start on port ${config.express.port}...`);
 		mongo = await connectToMongo(config.mongo);
+
+		////////////////////////////////////////////////////////////////////////////
+		// Remember to create collection and indexes as needed
+		if (!(await collectionExists(mongo, config?.mongo?.matAggCollectionName))) {
+			warn(`Materialised Aggregation Collection ${config.mongo.matAggCollectionName} does not exist - creating...`);
+			await mongo.db.createCollection(config.mongo.matAggCollectionName);
+			info(`Created collection ${config.mongo.matAggCollectionName}`);
+		} else {
+			info(`Materialised Aggregation Collection ${config.mongo.matAggCollectionName} exists`);
+		}
+		if (!(await indexExistsOnCollection(mongo, config.mongo.matAggCollectionName, config.mongo.matAggIndexIdAndScopeName))) {
+			warn(`Index ${config.mongo.matAggIndexIdAndScopeName} does not exist on collection ${config.mongo.matAggCollectionName} - creating...`);
+			await mongo.db.collection(config.mongo.matAggCollectionName).createIndex(config.mongo.matAggIndexIdAndScope, { unique: true });
+			info(`Created index ${config.mongo.matAggIndexIdAndScopeName} on collection ${config.mongo.matAggCollectionName}`);
+		} else {
+			info(`Index ${config.mongo.matAggIndexIdAndScopeName} exists on collection ${config.mongo.matAggCollectionName}`);
+		}
+
+		// Create Express app
 		const app = express();
 		app.use(express.json());
 		app.use(express.urlencoded({ extended: false }));
@@ -105,6 +126,7 @@ async function main() {
 		// Routes
 		app.use('/healthcheck', healthcheckRoutes);
 		app.use('/log', logRoutes);
+		app.use('/1-0', gamedayDataRouter);
 
 		////////////////////////////////////////////////////////////////////////////
 		// Others

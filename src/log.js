@@ -20,27 +20,27 @@ const loglevel = {
 let lv = loglevel.DEBUG;
 let levelPadLength = 0;
 let scopePadLength = 0;
-let uuidPadLength = 0;
+let contextPadLength = 0;
 const PID = process.pid;
 
 ////////////////////////////////////////////////////////////////////////////////
-function warn(msg, scope = null, uuid = null, useStackLevel = 4) {
-	log(msg, loglevel.WARNING, scope, uuid, useStackLevel);
+function warn(msg, scope = null, context = null, useStackLevel = 4) {
+	log(msg, loglevel.WARNING, scope, context, useStackLevel);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-function info(msg, scope = null, uuid = null, useStackLevel = 4) {
-	log(msg, loglevel.INFO, scope, uuid, useStackLevel);
+function info(msg, scope = null, context = null, useStackLevel = 4) {
+	log(msg, loglevel.INFO, scope, context, useStackLevel);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-function debug(msg, scope = null, uuid = null, useStackLevel = 4) {
-	log(msg, loglevel.DEBUG, scope, uuid, useStackLevel);
+function debug(msg, scope = null, context = null, useStackLevel = 4) {
+	log(msg, loglevel.DEBUG, scope, context, useStackLevel);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-function error(msg, scope = null, uuid = null, useStackLevel = 4) {
-	log(msg, loglevel.ERROR, scope, uuid, useStackLevel);
+function error(msg, scope = null, context = null, useStackLevel = 4) {
+	log(msg, loglevel.ERROR, scope, context, useStackLevel);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -50,7 +50,7 @@ function getCallerFunctionName(level = 4) {
 	const callerLine = stack[level >= stack.length ? stack.length - 1 : level]; // Adjust the index based on your environment
 	const functionNameMatch = callerLine?.match(/at (\w+)/);
 	const levelReport = functionNameMatch ? functionNameMatch[1] : null;
-	if (levelReport && levelReport.length > uuidPadLength && uuidPadLength > 0) uuidPadLength = levelReport.length + 1;
+	if (levelReport && levelReport.length > contextPadLength && contextPadLength > 0) contextPadLength = levelReport.length + 1;
 	return levelReport;
 }
 
@@ -66,24 +66,24 @@ function getCallerFileName(level = 4) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-function log(msg, level = loglevel.INFO, scope = null, uuid = null, useStackLevel = 4) {
+function log(msg, level = loglevel.INFO, scope = null, context = null, useStackLevel = 4) {
 	if (msg == null) msg = `n/a`;
 	if (_.isObject(msg)) msg = JSON.stringify(msg, null, 3);
 	if (scope == null) scope = getCallerFileName(useStackLevel);
-	if (uuid == null) uuid = getCallerFunctionName(useStackLevel);
+	if (context == null) context = getCallerFunctionName(useStackLevel);
 	const levelStr = level.s.padEnd(levelPadLength, ' ');
 	const scopeStr = _.isString(scope) ? scope.padEnd(scopePadLength, ' ') : ``;
-	const uuidStr = _.isString(uuid) ? uuid.padEnd(uuidPadLength, ' ') : ``;
+	const contextStr = _.isString(context) ? context.padEnd(contextPadLength, ' ') : ``;
 	const lines = msg.split(`\n`);
 	for (const line of lines) {
 		if (level.v >= lv.v) {
-			const lineStr = `${PID}|${new Date().toISOString()}|${levelStr}|${scopeStr}|${uuidStr}|${line}`;
+			const lineStr = `${PID}|${new Date().toISOString()}|${levelStr}|${scopeStr}|${contextStr}|${line}`;
 			const lineObj = {
 				pid: PID,
 				time: new Date().toISOString(),
 				level: levelStr,
 				scope: scopeStr,
-				context: uuidStr,
+				context: contextStr,
 				message: line,
 			};
 			console.log(config?.log?.useJson === true ? JSON.stringify(lineObj) : lineStr);
@@ -109,8 +109,8 @@ function getLastLogLines() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-function logAndThrowError(msg, scope = 'n/a', uuid = 'n/a') {
-	log(msg, loglevel.ERROR, scope, uuid);
+function logAndThrowError(msg, scope = 'n/a', context = 'n/a') {
+	log(msg, loglevel.ERROR, scope, context);
 	throw new Error(msg);
 }
 
@@ -141,8 +141,8 @@ function setScopePadLength(length) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-function setUuidPadLength(length) {
-	uuidPadLength = length;
+function setContextPadLength(length) {
+	contextPadLength = length;
 }
 
 // ////////////////////////////////////////////////////////////////////////////////
@@ -180,7 +180,7 @@ module.exports = {
 	logAndThrowError,
 	setLevelPadLength,
 	setScopePadLength,
-	setUuidPadLength,
+	setcontextPadLength: setContextPadLength,
 	logProgress,
 	getCallerFunctionName,
 	getCallerFileName,
