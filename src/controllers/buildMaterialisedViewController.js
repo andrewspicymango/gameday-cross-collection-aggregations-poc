@@ -168,145 +168,31 @@ async function buildMaterialisedViewController(req, res) {
 	}
 	//////////////////////////////////////////////////////////////////////////////
 }
-
 ////////////////////////////////////////////////////////////////////////////////
-// Mongo Competition Stage materialized view
-async function _getMongoCompetitionStageAggregatedView(mongo, competitionIdScope, competitionId, requestId) {
-	//////////////////////////////////////////////////////////////////////////////
-	/**
-	 * Aggregation pipeline that gathers all stage document IDs for a specific external competition
-	 * and upserts a single summary document into the `matAggCollectionName` collection.
-	 *  - The pipeline produces one summary document per external competition/scope pair.
-	 *  - Using whenMatched: "replace" ensures the target document exactly matches the projected shape.
-	 */
-	const pipeline = [
-		//////////////////////////////////////////////////////////////////////////////
-		// $match: Filters documents to only those that belong to the specified external competition
-		// and scope (uses competitionId and competitionIdScope from outer scope).
-		{ $match: { _externalCompetitionId: competitionId, _externalCompetitionIdScope: competitionIdScope } },
-		////////////////////////////////////////////////////////////////////////////
-		// $sort: Orders matched documents by their _id in ascending order so pushed stage IDs preserve chronological/insert order.
-		{ $sort: { _id: 1 } },
-		////////////////////////////////////////////////////////////////////////////
-		// $group: Groups documents by the pair {_externalCompetitionId, _externalCompetitionIdScope} and accumulates an array "stages" containing each document's _id.
-		{ $group: { _id: { id: '$_externalCompetitionId', scope: '$_externalCompetitionIdScope' }, stages: { $push: { _id: '$_id' } } } },
-		////////////////////////////////////////////////////////////////////////////
-		// $project: Shapes the summary document to:
-		//   - remove the aggregation _id,
-		//   - expose _externalCompetitionId and _externalCompetitionIdScope,
-		//   - include the collected stages array,
-		//   - add an "asOf" timestamp (using $$NOW),
-		//   - add a literal "type" field set to "SetCompetitionXStage".
-		{
-			$project: {
-				_id: 0,
-				resourceType: { $literal: `competition` },
-				_externalIdScope: '$_id.scope',
-				_externalId: '$_id.id',
-				targetType: { $literal: `stage` },
-				stages: 1,
-				updatedAt: '$$NOW',
-			},
-		},
-		////////////////////////////////////////////////////////////////////////////
-		// $merge: Writes the resulting summary document into the "rel_sets_competition_stages" collection,  matching on the two external id fields. If a match exists the document is replaced; if not, a new document is inserted.
-		{ $merge: { into: matAggCollectionName, on: ['resourceType', '_externalIdScope', '_externalId', 'targetType'], whenMatched: 'replace', whenNotMatched: 'insert' } },
-	];
-	await runPipeline(mongo, 'stages', pipeline, requestId);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-async function _getMongoCompetitionEventVenueAggregatedView(mongo, competitionIdScope, competitionId, requestId) {
-	const pipeline = [
-		//////////////////////////////////////////////////////////////////////////////
-		// 1) limit to the competition
-		{ $match: { _externalCompetitionIdScope: competitionIdScope, _externalCompetitionId: competitionId } },
-		////////////////////////////////////////////////////////////////////////////
-		// 2) keep only the join keys
-		{ $project: { compScope: '$_externalCompetitionIdScope', compId: '$_externalCompetitionId', stageId: '$_externalId', stageScope: '$_externalIdScope' } },
-		////////////////////////////////////////////////////////////////////////////
-		// 3) stages -> events
-		{
-			$lookup: {
-				from: 'events',
-				let: { sId: '$stageId', sScope: '$stageScope' },
-				pipeline: [
-					{
-						$match: {
-							$expr: {
-								$and: [{ $eq: ['$_externalStageId', '$$sId'] }, { $eq: ['$_externalStageIdScope', '$$sScope'] }],
-							},
-						},
-					},
-					{ $project: { _id: 1, _externalVenueId: 1, _externalVenueIdScope: 1 } },
-				],
-				as: 'events',
-			},
-		},
-		////////////////////////////////////////////////////////////////////////////
-		// explode events (if a competition has stages but no events, nothing will be emitted)
-		{ $unwind: { path: '$events', preserveNullAndEmptyArrays: true } },
-		////////////////////////////////////////////////////////////////////////////
-		// 4) events -> venues
-		{
-			$lookup: {
-				from: 'venues',
-				let: { vId: '$events._externalVenueId', vScope: '$events._externalVenueIdScope' },
-				// join on venue foreign keys
-				pipeline: [{ $match: { $expr: { $and: [{ $eq: ['$_externalId', '$$vId'] }, { $eq: ['$_externalIdScope', '$$vScope'] }] } } }, { $project: { _id: 1 } }],
-				as: 'venue',
-			},
-		},
-		////////////////////////////////////////////////////////////////////////////
-		// 5) explode venues (if a competition has stages but no venues, nothing will be emitted)
-		{ $unwind: { path: '$venue', preserveNullAndEmptyArrays: true } },
-		////////////////////////////////////////////////////////////////////////////
-		// 5) collect unique ids for both events and venues
-		{ $group: { _id: { scope: '$compScope', id: '$compId' }, eventIds: { $addToSet: '$events._id' }, venueIds: { $addToSet: '$venue._id' } } },
-
-		////////////////////////////////////////////////////////////////////////////
-		// 6) final single document
-		{
-			$project: {
-				_id: 0,
-				resourceType: { $literal: 'competition' },
-				_externalIdScope: '$_id.scope',
-				_externalId: '$_id.id',
-				targetType: { $literal: 'eventsAndVenues' },
-				////////////////////////////////////////////////////////////////////////
-				// strip nulls and wrap as {_id}
-				events: {
-					$map: {
-						input: { $filter: { input: '$eventIds', as: 'e', cond: { $ne: ['$$e', null] } } },
-						as: 'e',
-						in: { _id: '$$e' },
-					},
-				},
-				venues: {
-					$map: {
-						input: { $filter: { input: '$venueIds', as: 'v', cond: { $ne: ['$$v', null] } } },
-						as: 'v',
-						in: { _id: '$$v' },
-					},
-				},
-				updatedAt: '$$NOW',
-			},
-		},
-		////////////////////////////////////////////////////////////////////////////
-		// 7) materialize (optional)
-		{
-			$merge: {
-				into: 'materialisedAggregations',
-				on: ['resourceType', '_externalIdScope', '_externalId', 'targetType'],
-				whenMatched: 'replace',
-				whenNotMatched: 'insert',
-			},
-		},
-	];
-	return await runPipeline(mongo, 'stages', pipeline, requestId);
-}
-
-////////////////////////////////////////////////////////////////////////////////
+/**
+ * Build and execute an aggregation pipeline to materialize a competition view in MongoDB.
+ *
+ * This async helper constructs a full aggregation pipeline for a given competition scope and id
+ * (using `competitionFullPipeline`) and executes it against the "competitions" collection by
+ * delegating to `runPipeline`. If either `competitionIdScope` or `competitionId` are falsy, the
+ * function short-circuits and returns null.
+ *
+ * @async
+ * @private
+ * @param {Object} mongo - MongoDB connection/context object used by `runPipeline` (e.g. a Db or client wrapper).
+ * @param {string} competitionIdScope - Scope/type/namespace for the competition id (must be truthy).
+ * @param {(string|number)} competitionId - Identifier of the competition to build the aggregated view for (must be truthy).
+ * @param {string} [requestId] - Optional request identifier used for tracing/logging in `runPipeline`.
+ * @returns {Promise<null|void>} Resolves to null when input validation fails (missing scope or id). Otherwise resolves
+ * to void after the pipeline has been executed. Any result returned by `runPipeline` is not propagated.
+ *
+ * @throws {Error} Propagates errors thrown by `competitionFullPipeline` or `runPipeline`, e.g. pipeline construction
+ * or MongoDB execution errors.
+ *
+ * @example
+ * // Build and run the aggregated view for competition "123" in scope "national"
+ * await _getMongoCompetitionAggregatedView(mongoDb, 'national', '123', 'req-456');
+ */
 async function _getMongoCompetitionAggregatedView(mongo, competitionIdScope, competitionId, requestId) {
 	if (!competitionId || !competitionIdScope) return null;
 	const pipeline = competitionFullPipeline(competitionIdScope, competitionId);
