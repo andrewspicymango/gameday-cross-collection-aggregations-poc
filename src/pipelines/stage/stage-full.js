@@ -33,8 +33,8 @@ const pipeline = (STAGE_SCOPE, STAGE_ID) => [
 	// $project: extracts the first/meta values and normalizes facet outputs to arrays (defaults to [])
 	{
 		$project: {
-			_externalId: { $first: '$meta.competitionId' },
-			_externalIdScope: { $first: '$meta.competitionIdScope' },
+			_externalId: { $first: '$meta.stageId' },
+			_externalIdScope: { $first: '$meta.stageIdScope' },
 			resourceType: { $first: '$meta.resourceType' },
 			sgos: {
 				$ifNull: [{ $first: '$sgos.ids' }, []],
