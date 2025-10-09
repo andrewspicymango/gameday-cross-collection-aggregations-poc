@@ -1,0 +1,14 @@
+////////////////////////////////////////////////////////////////////////////////
+const competitionMetaFacet = [
+	{
+		$project: {
+			_id: 0,
+			competitionId: '$_externalId',
+			competitionIdScope: '$_externalIdScope',
+			resourceType: '$resourceType',
+		},
+	},
+];
+
+////////////////////////////////////////////////////////////////////////////////
+exports.competitionMetaFacet = competitionMetaFacet;

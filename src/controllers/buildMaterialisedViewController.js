@@ -5,17 +5,22 @@ const uuid = require('uuid');
 const { send200, send400, send404, send500 } = require('../utils/httpResponseUtils.js');
 const { debug, info, warn } = require('../log.js');
 const config = require('../config.js');
-const competitionFullPipeline = require('../pipelines/competition-sgo-stage-event-venue-team-sportsperson.js');
+const competitionFullPipeline = require('../pipelines/competition/competition-full.js');
+const stageFullPipeline = require('../pipelines/stage/stage-full.js');
+
+const competitionFullEventUpdatedPipeline = require('../pipelines/competition-full-event-updated.js');
 const runPipeline = require('../pipelines/runPipeline.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
-const matAggCollectionName = `materialisedAggregations`;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Notes
 // curl -X POST localhost:8080/1-0/aggregate/competitions/bblapi/2023:BBL?create=true
-// curl -X POST localhost:8080/1-0/aggregate/competitions/fifa/1jt5mxgn4q5r6mknmlqv5qjh0?create=true
+// curl -X POST localhost:8080/1-0/aggregate/events/bblapi/6ea116b7-7c38-47b3-a1ee-db90108034b2?create=true
+// curl -X POST localhost:8080/1-0/aggregate/events/bblapi/6ea116b7-7c38-47b3-a1ee-db90108034b2?create=false
+// curl -X POST localhost:8080/1-0/aggregate/competitions/fifa/289175?create=true
+// curl -X POST localhost:8080/1-0/aggregate/events/fifa/146186?create=false
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -133,19 +138,35 @@ async function buildMaterialisedViewController(req, res) {
 		switch (schemaType.toLowerCase()) {
 			case 'competitions':
 				if (createResource) await _getMongoCompetitionAggregatedView(mongo, scope, requestedId, id);
-				// if (createResource) await _getMongoCompetitionStageAggregatedView(mongo, scope, requestedId, id);
-				// if (createResource) await _getMongoCompetitionEventVenueAggregatedView(mongo, scope, requestedId, id);
-
-				send200(res, { status: 200, service: config?.serviceName, message: `Materialised aggregation view created for ${schemaType} ${scope}/${requestedId}` }, config);
+				send200(
+					res,
+					{
+						status: 200,
+						service: config?.serviceName,
+						message: `Materialised aggregation views created for ${createResource ? 'new' : 'existing'} ${schemaType} ${scope}/${requestedId}`,
+					},
+					config
+				);
 				return;
+			case 'stages':
+				if (createResource) await _getMongoStageAggregatedView(mongo, scope, requestedId, id);
+				send200(
+					res,
+					{
+						status: 200,
+						service: config?.serviceName,
+						message: `Materialised aggregation views created for ${createResource ? 'new' : 'existing'} ${schemaType} ${scope}/${requestedId}`,
+					},
+					config
+				);
+				return;
+			case 'events':
 			case 'clubs':
 			case 'rankings':
 			case 'keymoments':
 			case 'sportspersons':
-			case 'stages':
 			case 'teams':
 			case 'venues':
-			case 'events':
 			case 'stickies':
 			case 'relationships':
 			case 'staff':
@@ -197,6 +218,20 @@ async function _getMongoCompetitionAggregatedView(mongo, competitionIdScope, com
 	if (!competitionId || !competitionIdScope) return null;
 	const pipeline = competitionFullPipeline(competitionIdScope, competitionId);
 	await runPipeline(mongo, 'competitions', pipeline, requestId);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+async function _getMongoStageAggregatedView(mongo, stageIdScope, stageId, requestId) {
+	if (!stageId || !stageIdScope) return null;
+	const pipeline = stageFullPipeline(stageIdScope, stageId);
+	await runPipeline(mongo, 'stages', pipeline, requestId);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+async function _getMongoCompetitionAggregatedViewAfterEventUpdate(mongo, eventIdScope, eventId, requestId) {
+	if (!eventIdScope || !eventId) return null;
+	const pipeline = competitionFullEventUpdatedPipeline(eventIdScope, eventId);
+	await runPipeline(mongo, 'events', pipeline, requestId);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
