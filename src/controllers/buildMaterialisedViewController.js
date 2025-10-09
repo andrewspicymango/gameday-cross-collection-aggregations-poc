@@ -7,6 +7,8 @@ const { debug, info, warn } = require('../log.js');
 const config = require('../config.js');
 const competitionFullPipeline = require('../pipelines/competition/competition-full.js');
 const stageFullPipeline = require('../pipelines/stage/stage-full.js');
+const eventFullPipeline = require('../pipelines/event/event-full.js');
+const eventWithKeyMomentsPipeline = require('../pipelines/event/event-with-keymoments.js');
 
 const competitionFullEventUpdatedPipeline = require('../pipelines/competition-full-event-updated.js');
 const runPipeline = require('../pipelines/runPipeline.js');
@@ -161,6 +163,18 @@ async function buildMaterialisedViewController(req, res) {
 				);
 				return;
 			case 'events':
+				if (createResource) await _getMongoEventAggregatedView(mongo, scope, requestedId, id);
+				if (createResource) await _getMongoEventsAndKeyMomentsAggregatedView(mongo, scope, requestedId, id);
+				send200(
+					res,
+					{
+						status: 200,
+						service: config?.serviceName,
+						message: `Materialised aggregation views created for ${createResource ? 'new' : 'existing'} ${schemaType} ${scope}/${requestedId}`,
+					},
+					config
+				);
+				return;
 			case 'clubs':
 			case 'rankings':
 			case 'keymoments':
@@ -173,7 +187,6 @@ async function buildMaterialisedViewController(req, res) {
 			case 'stories':
 			case 'nations':
 			case 'sgos':
-				break;
 			default:
 				warn(`No valid Schema found when trying to get: ${schemaType}`, 'WD0040', 400, 'Invalid Schema');
 				send400(res, {
@@ -228,9 +241,16 @@ async function _getMongoStageAggregatedView(mongo, stageIdScope, stageId, reques
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-async function _getMongoCompetitionAggregatedViewAfterEventUpdate(mongo, eventIdScope, eventId, requestId) {
-	if (!eventIdScope || !eventId) return null;
-	const pipeline = competitionFullEventUpdatedPipeline(eventIdScope, eventId);
+async function _getMongoEventAggregatedView(mongo, eventIdScope, eventId, requestId) {
+	if (!eventId || !eventIdScope) return null;
+	const pipeline = eventFullPipeline(eventIdScope, eventId);
+	await runPipeline(mongo, 'events', pipeline, requestId);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+async function _getMongoEventsAndKeyMomentsAggregatedView(mongo, eventIdScope, eventId, requestId) {
+	if (!eventId || !eventIdScope) return null;
+	const pipeline = eventWithKeyMomentsPipeline(eventIdScope, eventId);
 	await runPipeline(mongo, 'events', pipeline, requestId);
 }
 
