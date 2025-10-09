@@ -1,0 +1,103 @@
+const { stageMetaFacet } = require('./stageMetaFacet');
+const { stageEventsFacet } = require('./stageEventsFacet');
+const { stageSgoFacet } = require('./stageSgoFacet');
+const { stageCompetitionFacet } = require('./stageCompetitionFacet');
+const { stageTeamsFacet } = require('./stageTeamsFacet');
+const { stageSportsPersonsFacet } = require('./stageSportsPersonsFacet');
+const { stageVenuesFacet } = require('./stageVenuesFacet');
+
+const targetType = [`sgo`, `competition`, `event`, `venue`, `team`, `sportsPerson`].join('/');
+const keyInAggregation = ['resourceType', '_externalIdScope', '_externalId', 'targetType'];
+
+////////////////////////////////////////////////////////////////////////////////
+const pipeline = (STAGE_SCOPE, STAGE_ID) => [
+	//////////////////////////////////////////////////////////////////////////////
+	//$match: filters by _externalId and _externalIdScope (COMP_ID, COMP_SCOPE)
+	{ $match: { _externalId: STAGE_ID, _externalIdScope: STAGE_SCOPE } },
+
+	//////////////////////////////////////////////////////////////////////////////
+	// $facet: runs the provided sub-facets (sgos, stages, events, teams, sportsPersons, venues, meta)
+	{
+		$facet: {
+			meta: stageMetaFacet,
+			sgos: stageSgoFacet,
+			competitions: stageCompetitionFacet,
+			events: stageEventsFacet,
+			teams: stageTeamsFacet,
+			sportsPersons: stageSportsPersonsFacet,
+			venues: stageVenuesFacet,
+		},
+	},
+
+	//////////////////////////////////////////////////////////////////////////////
+	// $project: extracts the first/meta values and normalizes facet outputs to arrays (defaults to [])
+	{
+		$project: {
+			_externalId: { $first: '$meta.competitionId' },
+			_externalIdScope: { $first: '$meta.competitionIdScope' },
+			resourceType: { $first: '$meta.resourceType' },
+			sgos: {
+				$ifNull: [{ $first: '$sgos.ids' }, []],
+			},
+			sgoKeys: {
+				$ifNull: [{ $first: '$sgos.keys' }, []],
+			},
+			competitions: {
+				$ifNull: [{ $first: '$competitions.ids' }, []],
+			},
+			competitionKeys: {
+				$ifNull: [{ $first: '$competitions.keys' }, []],
+			},
+			events: {
+				$ifNull: [{ $first: '$events.ids' }, []],
+			},
+			eventKeys: {
+				$ifNull: [{ $first: '$events.keys' }, []],
+			},
+			teams: {
+				$ifNull: [{ $first: '$teams.ids' }, []],
+			},
+			teamKeys: {
+				$ifNull: [{ $first: '$teams.keys' }, []],
+			},
+			sportsPersons: {
+				$ifNull: [{ $first: '$sportsPersons.ids' }, []],
+			},
+			sportsPersonKeys: {
+				$ifNull: [{ $first: '$sportsPersons.keys' }, []],
+			},
+			venues: {
+				$ifNull: [{ $first: '$venues.ids' }, []],
+			},
+			venueKeys: {
+				$ifNull: [{ $first: '$venues.keys' }, []],
+			},
+		},
+	},
+
+	//////////////////////////////////////////////////////////////////////////////
+	// $addFields: sets output metadata (resourceType, _externalId, _externalIdScope, targetType)
+	// and stamps lastUpdated with $$NOW (pipeline execution time)
+	{
+		$addFields: {
+			resourceType: '$resourceType',
+			_externalId: '$_externalId',
+			_externalIdScope: '$_externalIdScope',
+			targetType,
+			lastUpdated: '$$NOW', // current pipeline execution time
+		},
+	},
+
+	//////////////////////////////////////////////////////////////////////////////
+	{
+		$merge: {
+			into: 'materialisedAggregations',
+			on: keyInAggregation,
+			whenMatched: 'replace',
+			whenNotMatched: 'insert',
+		},
+	},
+];
+
+////////////////////////////////////////////////////////////////////////////////
+module.exports = pipeline;
