@@ -2,7 +2,7 @@
 const competitionMetaFacet = [
 	{
 		$project: {
-			_id: 0,
+			_id: 1,
 			competitionId: '$_externalId',
 			competitionIdScope: '$_externalIdScope',
 			resourceType: '$resourceType',

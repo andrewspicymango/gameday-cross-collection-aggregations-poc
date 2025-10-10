@@ -27,7 +27,7 @@
 const stageMetaFacet = [
 	{
 		$project: {
-			_id: 0,
+			_id: 1,
 			stageId: '$_externalId',
 			stageIdScope: '$_externalIdScope',
 			resourceType: '$resourceType',

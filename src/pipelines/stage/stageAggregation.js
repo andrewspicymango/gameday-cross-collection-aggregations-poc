@@ -6,7 +6,7 @@ const { stageTeamsFacet } = require('./stageTeamsFacet');
 const { stageSportsPersonsFacet } = require('./stageSportsPersonsFacet');
 const { stageVenuesFacet } = require('./stageVenuesFacet');
 
-const targetType = [`sgo`, `competition`, `event`, `venue`, `team`, `sportsPerson`].join('/');
+const stageAggregationTargetType = [`sgo`, `competition`, `event`, `venue`, `team`, `sportsPerson`].join('/');
 const keyInAggregation = ['resourceType', '_externalIdScope', '_externalId', 'targetType'];
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -33,6 +33,7 @@ const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 	// $project: extracts the first/meta values and normalizes facet outputs to arrays (defaults to [])
 	{
 		$project: {
+			gamedayId: { $first: '$meta._id' },
 			_externalId: { $first: '$meta.stageId' },
 			_externalIdScope: { $first: '$meta.stageIdScope' },
 			resourceType: { $first: '$meta.resourceType' },
@@ -83,7 +84,7 @@ const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 			resourceType: '$resourceType',
 			_externalId: '$_externalId',
 			_externalIdScope: '$_externalIdScope',
-			targetType,
+			targetType: stageAggregationTargetType,
 			lastUpdated: '$$NOW', // current pipeline execution time
 		},
 	},
@@ -101,8 +102,8 @@ const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 
 ////////////////////////////////////////////////////////////////////////////////
 function getStageQueryToFindMergedDocument(stageId, stageIdScope) {
-	return { resourceType: 'stage', _externalIdScope: stageIdScope, _externalId: stageId, targetType };
+	return { resourceType: 'stage', _externalIdScope: stageIdScope, _externalId: stageId, targetType: stageAggregationTargetType };
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = { pipeline, getStageQueryToFindMergedDocument };
+module.exports = { pipeline, getStageQueryToFindMergedDocument, stageAggregationTargetType };

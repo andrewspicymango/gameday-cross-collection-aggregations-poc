@@ -17,4 +17,4 @@ async function runPipeline(mongo, targetCollection, pipeline, requestId) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = runPipeline;
+module.exports = { runPipeline };

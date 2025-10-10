@@ -5,14 +5,18 @@
 // competition view when those entities change.
 ////////////////////////////////////////////////////////////////////////////////
 const _ = require('lodash');
-const { pipeline, getCompetitionQueryToFindMergedDocument } = require('./competition-full');
-const runPipeline = require('../runPipeline');
+const { debug } = require('../../log');
+const { runPipeline } = require('../runPipeline');
+const { pipeline } = require('./competitionAggregation');
+const { getCompetitionQueryToFindMergedDocument } = require('./competitionAggregation');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Process competition updates
 async function processCompetition(config, mongo, competitionIdScope, competitionId, requestId) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
-	if (!competitionId || !competitionIdScope) return null;
+	if (!competitionId || !competitionIdScope) throw new Error('Invalid parameters: competitionId and competitionIdScope are required');
+	//////////////////////////////////////////////////////////////////////////////
+	debug(`processCompetition: competitionIdScope=${competitionIdScope}, competitionId=${competitionId}`, requestId);
 	const pipelineObj = pipeline(config, competitionIdScope, competitionId);
 	const query = getCompetitionQueryToFindMergedDocument(competitionId, competitionIdScope);
 	await runPipeline(mongo, 'competitions', pipelineObj, requestId);

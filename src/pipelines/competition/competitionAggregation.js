@@ -5,7 +5,7 @@ const { competitionStagesFacet } = require('./competitionStagesFacet');
 const { competitionTeamsFacet } = require('./competitionTeamsFacet');
 const { competitionSportsPersonsFacet } = require('./competitionSportsPersonsFacet');
 const { competitionVenuesFacet } = require('./competitionVenuesFacet');
-const targetType = [`sgo`, `stage`, `event`, `venue`, `team`, `sportsPerson`].join('/');
+const competitionAggregationTargetType = [`sgo`, `stage`, `event`, `venue`, `team`, `sportsPerson`].join('/');
 const keyInAggregation = ['resourceType', '_externalIdScope', '_externalId', 'targetType'];
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -44,6 +44,7 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
 	// $project: extracts the first/meta values and normalizes facet outputs to arrays (defaults to [])
 	{
 		$project: {
+			gamedayId: { $first: '$meta._id' },
 			_externalId: { $first: '$meta.competitionId' },
 			_externalIdScope: { $first: '$meta.competitionIdScope' },
 			resourceType: { $first: '$meta.resourceType' },
@@ -94,7 +95,7 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
 			resourceType: '$resourceType',
 			_externalId: '$_externalId',
 			_externalIdScope: '$_externalIdScope',
-			targetType,
+			targetType: competitionAggregationTargetType,
 			lastUpdated: '$$NOW', // current pipeline execution time
 		},
 	},
@@ -127,8 +128,8 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
  *  - targetType: value taken from the surrounding scope
  */
 function getCompetitionQueryToFindMergedDocument(competitionId, competitionIdScope) {
-	return { resourceType: 'competition', _externalIdScope: competitionIdScope, _externalId: competitionId, targetType };
+	return { resourceType: 'competition', _externalIdScope: competitionIdScope, _externalId: competitionId, targetType: competitionAggregationTargetType };
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = { pipeline, getCompetitionQueryToFindMergedDocument };
+module.exports = { pipeline, getCompetitionQueryToFindMergedDocument, competitionAggregationTargetType };

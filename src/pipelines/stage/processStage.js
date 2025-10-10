@@ -15,10 +15,13 @@
 //    aggregation view to ensure it is up to date
 ////////////////////////////////////////////////////////////////////////////////
 const _ = require('lodash');
+const { debug } = require('../../log');
 const { keySeparator } = require('../constants');
-const { processCompetition } = require('../competition/processCompetition');
-const { pipeline, getStageQueryToFindMergedDocument } = require('./stage-full');
-const runPipeline = require('../runPipeline');
+const { runPipeline } = require('../runPipeline');
+const { splitKey } = require('../splitKey');
+const { pipeline } = require('./stageAggregation');
+const { getStageQueryToFindMergedDocument } = require('./stageAggregation');
+const { updateResourceReferencesInCompetitionAggregations } = require('../competition/updateresourceReferencesInCompetitionAggregations');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -62,31 +65,29 @@ const runPipeline = require('../runPipeline');
  */
 async function processStage(config, mongo, stageIdScope, stageId, requestId) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
-	if (!stageId || !stageIdScope) return null;
+	if (!stageId || !stageIdScope) throw new Error('Invalid parameters: stageId and stageIdScope are required');
+	//////////////////////////////////////////////////////////////////////////////
+	debug(`processStage: stageIdScope=${stageIdScope}, stageId=${stageId}`, requestId);
 	//////////////////////////////////////////////////////////////////////////////
 	const pipelineObj = pipeline(config, stageIdScope, stageId);
 	const stageAggregationDocQuery = getStageQueryToFindMergedDocument(stageId, stageIdScope);
 	//////////////////////////////////////////////////////////////////////////////
 	// Retrieve the previous version of the stage aggregation (if it exists) and calculate old competition keys
 	const oldAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(stageAggregationDocQuery);
-	const oldCompetitionKey = oldAggregationDoc?.competitionKeys[0] || null;
-	const oldExternalCompetitionId = oldCompetitionKey ? oldCompetitionKey.split(keySeparator)[0] || null : null;
-	const oldExternalCompetitionIdScope = oldCompetitionKey ? oldCompetitionKey.split(keySeparator)[1] || null : null;
+	const oldCompetitionScopeAndId = splitKey(oldAggregationDoc?.competitionKeys[0]);
 	//////////////////////////////////////////////////////////////////////////////
 	// Build the stage aggregation view
 	await runPipeline(mongo, 'stages', pipelineObj, requestId);
 	//////////////////////////////////////////////////////////////////////////////
 	// Retrieve the new version of the stage aggregation and calculate new competition keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(stageAggregationDocQuery);
-	const newCompetitionKey = newAggregationDoc?.competitionKeys[0] || null;
-	const newExternalCompetitionId = newCompetitionKey ? newCompetitionKey.split(keySeparator)[0] || null : null;
-	const newExternalCompetitionIdScope = newCompetitionKey ? newCompetitionKey.split(keySeparator)[1] || null : null;
+	const stageObjectId = newAggregationDoc?.gamedayId;
+	const stageKey = `${stageId}${keySeparator}${stageIdScope}`;
+	const newCompetitionScopeAndId = splitKey(newAggregationDoc?.competitionKeys[0]);
 	//////////////////////////////////////////////////////////////////////////////
-	// We have a different competition associated with this stage, so we need to rebuild both the old and new competitions
-	if (oldExternalCompetitionId != newExternalCompetitionId || oldExternalCompetitionIdScope != newExternalCompetitionIdScope) {
-		await processCompetition(config, mongo, oldExternalCompetitionIdScope, oldExternalCompetitionId, requestId);
-		await processCompetition(config, mongo, newExternalCompetitionIdScope, newExternalCompetitionId, requestId);
-	}
+	// The stage may have moved competitions if either the competition id or scope has changed
+	// So we may need to update competition aggregations
+	await updateResourceReferencesInCompetitionAggregations(mongo, config, oldCompetitionScopeAndId, newCompetitionScopeAndId, 'stage', stageObjectId, stageKey, requestId);
 	return newAggregationDoc;
 }
 

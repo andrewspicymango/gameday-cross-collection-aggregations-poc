@@ -5,8 +5,8 @@ const uuid = require('uuid');
 const { send200, send400, send404, send500 } = require('../utils/httpResponseUtils.js');
 const { debug, info, warn } = require('../log.js');
 const config = require('../config.js');
-const competitionFullPipeline = require('../pipelines/competition/competition-full.js');
-const stageFullPipeline = require('../pipelines/stage/stage-full.js');
+const competitionFullPipeline = require('../pipelines/competition/competitionAggregation.js');
+const stageFullPipeline = require('../pipelines/stage/stageAggregation.js');
 const eventFullPipeline = require('../pipelines/event/event-full.js');
 const eventWithKeyMomentsPipeline = require('../pipelines/event/event-with-keymoments.js');
 
@@ -16,6 +16,7 @@ const runPipeline = require('../pipelines/runPipeline.js');
 ////////////////////////////////////////////////////////////////////////////////
 const { processCompetition } = require('../pipelines/competition/processCompetition.js');
 const { processStage } = require('../pipelines/stage/processStage.js');
+const { processEvent } = require('../pipelines/event/processEvent.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -153,8 +154,13 @@ async function buildMaterialisedViewController(req, res) {
 		}
 		////////////////////////////////////////////////////////////////////////////
 		// STAGES
-		if (schemaType.toLowerCase() == 'stages') {
+		else if (schemaType.toLowerCase() == 'stages') {
 			response = await processStage(config, mongo, scope, requestedId, id);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// EVENTS
+		else if (schemaType.toLowerCase() == 'events') {
+			response = await processEvent(config, mongo, scope, requestedId, id);
 		}
 		////////////////////////////////////////////////////////////////////////////
 		// ALL OTHERS NOT YET SUPPORTED
