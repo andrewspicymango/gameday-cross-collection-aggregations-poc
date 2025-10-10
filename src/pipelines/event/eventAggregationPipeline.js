@@ -5,12 +5,13 @@ const { eventSgoFacet } = require('./eventSgoFacet');
 const { eventVenuesFacet } = require('./eventVenuesFacet');
 const { eventTeamsFacet } = require('./eventTeamsFacet');
 const { eventSportsPersonsFacet } = require('./eventSportsPersonsFacet');
-const targetType = [`sgo`, `competition`, `stage`, `venue`, `team`, `sportsPerson`].join('/');
+const eventAggregationTargetType = [`sgo`, `competition`, `stage`, `venue`, `team`, `sportsPerson`].join('/');
 const keyInAggregation = ['resourceType', '_externalIdScope', '_externalId', 'targetType'];
 
-const pipeline = (EVENT_SCOPE, EVENT_ID) => [
+////////////////////////////////////////////////////////////////////////////////
+const pipeline = (config, EVENT_SCOPE, EVENT_ID) => [
 	{ $match: { _externalId: EVENT_ID, _externalIdScope: EVENT_SCOPE } },
-
+	//////////////////////////////////////////////////////////////////////////////
 	{
 		$facet: {
 			meta: eventMetaFacet,
@@ -22,9 +23,10 @@ const pipeline = (EVENT_SCOPE, EVENT_ID) => [
 			sportsPersons: eventSportsPersonsFacet,
 		},
 	},
-
+	//////////////////////////////////////////////////////////////////////////////
 	{
 		$project: {
+			gamedayId: { $first: '$meta._id' },
 			_externalId: { $first: '$meta.eventId' },
 			_externalIdScope: { $first: '$meta.eventIdScope' },
 			resourceType: { $first: '$meta.resourceType' },
@@ -48,14 +50,14 @@ const pipeline = (EVENT_SCOPE, EVENT_ID) => [
 			resourceType: '$resourceType',
 			_externalId: '$_externalId',
 			_externalIdScope: '$_externalIdScope',
-			targetType,
+			targetType: eventAggregationTargetType,
 			lastUpdated: '$$NOW',
 		},
 	},
 
 	{
 		$merge: {
-			into: 'materialisedAggregations',
+			into: config?.mongo?.matAggCollectionName || 'materialisedAggregations',
 			on: keyInAggregation,
 			whenMatched: 'replace',
 			whenNotMatched: 'insert',
@@ -63,4 +65,10 @@ const pipeline = (EVENT_SCOPE, EVENT_ID) => [
 	},
 ];
 
-module.exports = pipeline;
+////////////////////////////////////////////////////////////////////////////////
+function getEventQueryToFindMergedDocument(eventId, eventIdScope) {
+	return { resourceType: 'event', _externalIdScope: eventIdScope, _externalId: eventId, targetType: eventAggregationTargetType };
+}
+
+////////////////////////////////////////////////////////////////////////////////
+module.exports = { pipeline, getEventQueryToFindMergedDocument, eventAggregationTargetType };

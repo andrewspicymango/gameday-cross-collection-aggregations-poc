@@ -6,11 +6,13 @@ const { eventVenuesFacet } = require('./eventVenuesFacet');
 const { eventTeamsFacet } = require('./eventTeamsFacet');
 const { eventSportsPersonsFacet } = require('./eventSportsPersonsFacet');
 const { eventKeyMomentsFacet } = require('./eventKeyMomentsFacet');
-const targetType = [`sgo`, `competition`, `stage`, `keyMoment`, `venue`, `team`, `sportsPerson`].join('/');
+const eventWithKeyMomentTargetType = [`sgo`, `competition`, `stage`, `keyMoment`, `venue`, `team`, `sportsPerson`].join('/');
 const keyInAggregation = ['resourceType', '_externalIdScope', '_externalId', 'targetType'];
 
 const pipeline = (EVENT_SCOPE, EVENT_ID) => [
+	//////////////////////////////////////////////////////////////////////////////
 	{ $match: { _externalId: EVENT_ID, _externalIdScope: EVENT_SCOPE } },
+	//////////////////////////////////////////////////////////////////////////////
 	{
 		$facet: {
 			meta: eventMetaFacet,
@@ -23,8 +25,10 @@ const pipeline = (EVENT_SCOPE, EVENT_ID) => [
 			keyMoments: eventKeyMomentsFacet,
 		},
 	},
+	//////////////////////////////////////////////////////////////////////////////
 	{
 		$project: {
+			gamedayId: { $first: '$meta._id' },
 			_externalId: { $first: '$meta.eventId' },
 			_externalIdScope: { $first: '$meta.eventIdScope' },
 			resourceType: { $first: '$meta.resourceType' },
@@ -57,7 +61,7 @@ const pipeline = (EVENT_SCOPE, EVENT_ID) => [
 			resourceType: '$resourceType',
 			_externalId: '$_externalId',
 			_externalIdScope: '$_externalIdScope',
-			targetType,
+			targetType: eventWithKeyMomentTargetType,
 			lastUpdated: '$$NOW',
 		},
 	},
@@ -71,4 +75,10 @@ const pipeline = (EVENT_SCOPE, EVENT_ID) => [
 	},
 ];
 
-module.exports = pipeline;
+////////////////////////////////////////////////////////////////////////////////
+function getEventWithKeyMomentQueryToFindMergedDocument(eventId, eventIdScope) {
+	return { resourceType: 'event', _externalIdScope: eventIdScope, _externalId: eventId, targetType: eventWithKeyMomentTargetType };
+}
+
+////////////////////////////////////////////////////////////////////////////////
+module.exports = { pipeline, getEventWithKeyMomentQueryToFindMergedDocument, eventWithKeyMomentTargetType };

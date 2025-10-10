@@ -7,8 +7,8 @@
 const _ = require('lodash');
 const { debug } = require('../../log');
 const { runPipeline } = require('../runPipeline');
-const { pipeline } = require('./competitionAggregation');
-const { getCompetitionQueryToFindMergedDocument } = require('./competitionAggregation');
+const { pipeline } = require('./competitionAggregationPipeline');
+const { getCompetitionQueryToFindMergedDocument } = require('./competitionAggregationPipeline');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Process competition updates

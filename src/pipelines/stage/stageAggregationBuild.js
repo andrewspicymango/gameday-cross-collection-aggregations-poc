@@ -19,9 +19,10 @@ const { debug } = require('../../log');
 const { keySeparator } = require('../constants');
 const { runPipeline } = require('../runPipeline');
 const { splitKey } = require('../splitKey');
-const { pipeline } = require('./stageAggregation');
-const { getStageQueryToFindMergedDocument } = require('./stageAggregation');
-const { updateResourceReferencesInCompetitionAggregations } = require('../competition/updateresourceReferencesInCompetitionAggregations');
+const { pipeline } = require('./stageAggregationPipeline');
+const { getStageQueryToFindMergedDocument } = require('./stageAggregationPipeline');
+const { updateResourceReferencesInAggregationDoc } = require('../updateResourceReferencesInAggregationDoc');
+const { competitionAggregationTargetType } = require('../competition/competitionAggregationPipeline');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -74,7 +75,7 @@ async function processStage(config, mongo, stageIdScope, stageId, requestId) {
 	//////////////////////////////////////////////////////////////////////////////
 	// Retrieve the previous version of the stage aggregation (if it exists) and calculate old competition keys
 	const oldAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(stageAggregationDocQuery);
-	const oldCompetitionScopeAndId = splitKey(oldAggregationDoc?.competitionKeys[0]);
+	const oldCompScopeAndId = splitKey(oldAggregationDoc?.competitionKeys[0]);
 	//////////////////////////////////////////////////////////////////////////////
 	// Build the stage aggregation view
 	await runPipeline(mongo, 'stages', pipelineObj, requestId);
@@ -83,11 +84,22 @@ async function processStage(config, mongo, stageIdScope, stageId, requestId) {
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(stageAggregationDocQuery);
 	const stageObjectId = newAggregationDoc?.gamedayId;
 	const stageKey = `${stageId}${keySeparator}${stageIdScope}`;
-	const newCompetitionScopeAndId = splitKey(newAggregationDoc?.competitionKeys[0]);
+	const newCompScopeAndId = splitKey(newAggregationDoc?.competitionKeys[0]);
 	//////////////////////////////////////////////////////////////////////////////
 	// The stage may have moved competitions if either the competition id or scope has changed
 	// So we may need to update competition aggregations
-	await updateResourceReferencesInCompetitionAggregations(mongo, config, oldCompetitionScopeAndId, newCompetitionScopeAndId, 'stage', stageObjectId, stageKey, requestId);
+	await updateResourceReferencesInAggregationDoc(
+		mongo,
+		config,
+		'competition',
+		oldCompScopeAndId,
+		newCompScopeAndId,
+		competitionAggregationTargetType,
+		'stage',
+		stageObjectId,
+		stageKey,
+		requestId
+	);
 	return newAggregationDoc;
 }
 

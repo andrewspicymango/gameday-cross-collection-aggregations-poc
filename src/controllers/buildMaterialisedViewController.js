@@ -5,18 +5,12 @@ const uuid = require('uuid');
 const { send200, send400, send404, send500 } = require('../utils/httpResponseUtils.js');
 const { debug, info, warn } = require('../log.js');
 const config = require('../config.js');
-const competitionFullPipeline = require('../pipelines/competition/competitionAggregation.js');
-const stageFullPipeline = require('../pipelines/stage/stageAggregation.js');
-const eventFullPipeline = require('../pipelines/event/event-full.js');
-const eventWithKeyMomentsPipeline = require('../pipelines/event/event-with-keymoments.js');
-
-const competitionFullEventUpdatedPipeline = require('../pipelines/competition-full-event-updated.js');
 const runPipeline = require('../pipelines/runPipeline.js');
 
 ////////////////////////////////////////////////////////////////////////////////
-const { processCompetition } = require('../pipelines/competition/processCompetition.js');
-const { processStage } = require('../pipelines/stage/processStage.js');
-const { processEvent } = require('../pipelines/event/processEvent.js');
+const { processCompetition } = require('../pipelines/competition/competitionAggregationBuild.js');
+const { processStage } = require('../pipelines/stage/stageAggregationBuild.js');
+const { processEvent } = require('../pipelines/event/eventAggregationBuild.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -186,58 +180,6 @@ async function buildMaterialisedViewController(req, res) {
 		send500(res, err.message);
 		return;
 	}
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/**
- * Build and execute an aggregation pipeline to materialize a competition view in MongoDB.
- *
- * This async helper constructs a full aggregation pipeline for a given competition scope and id
- * (using `competitionFullPipeline`) and executes it against the "competitions" collection by
- * delegating to `runPipeline`. If either `competitionIdScope` or `competitionId` are falsy, the
- * function short-circuits and returns null.
- *
- * @async
- * @private
- * @param {Object} mongo - MongoDB connection/context object used by `runPipeline` (e.g. a Db or client wrapper).
- * @param {string} competitionIdScope - Scope/type/namespace for the competition id (must be truthy).
- * @param {(string|number)} competitionId - Identifier of the competition to build the aggregated view for (must be truthy).
- * @param {string} [requestId] - Optional request identifier used for tracing/logging in `runPipeline`.
- * @returns {Promise<null|void>} Resolves to null when input validation fails (missing scope or id). Otherwise resolves
- * to void after the pipeline has been executed. Any result returned by `runPipeline` is not propagated.
- *
- * @throws {Error} Propagates errors thrown by `competitionFullPipeline` or `runPipeline`, e.g. pipeline construction
- * or MongoDB execution errors.
- *
- * @example
- * // Build and run the aggregated view for competition "123" in scope "national"
- * await _getMongoCompetitionAggregatedView(mongoDb, 'national', '123', 'req-456');
- */
-async function _getMongoCompetitionAggregatedView(mongo, competitionIdScope, competitionId, requestId) {
-	if (!competitionId || !competitionIdScope) return null;
-	const pipeline = competitionFullPipeline(competitionIdScope, competitionId);
-	await runPipeline(mongo, 'competitions', pipeline, requestId);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-async function _getMongoStageAggregatedView(mongo, stageIdScope, stageId, requestId) {
-	if (!stageId || !stageIdScope) return null;
-	const pipeline = stageFullPipeline(stageIdScope, stageId);
-	await runPipeline(mongo, 'stages', pipeline, requestId);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-async function _getMongoEventAggregatedView(mongo, eventIdScope, eventId, requestId) {
-	if (!eventId || !eventIdScope) return null;
-	const pipeline = eventFullPipeline(eventIdScope, eventId);
-	await runPipeline(mongo, 'events', pipeline, requestId);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-async function _getMongoEventsAndKeyMomentsAggregatedView(mongo, eventIdScope, eventId, requestId) {
-	if (!eventId || !eventIdScope) return null;
-	const pipeline = eventWithKeyMomentsPipeline(eventIdScope, eventId);
-	await runPipeline(mongo, 'events', pipeline, requestId);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
