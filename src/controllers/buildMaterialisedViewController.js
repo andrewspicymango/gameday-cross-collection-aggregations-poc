@@ -14,6 +14,10 @@ const competitionFullEventUpdatedPipeline = require('../pipelines/competition-fu
 const runPipeline = require('../pipelines/runPipeline.js');
 
 ////////////////////////////////////////////////////////////////////////////////
+const { processCompetition } = require('../pipelines/competition/processCompetition.js');
+const { processStage } = require('../pipelines/stage/processStage.js');
+
+////////////////////////////////////////////////////////////////////////////////
 // Constants
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -136,72 +140,48 @@ async function buildMaterialisedViewController(req, res) {
 	)}`;
 	info(report, id);
 
+	//////////////////////////////////////////////////////////////////////////////
+	// Build the materialised aggregation view
 	try {
-		switch (schemaType.toLowerCase()) {
-			case 'competitions':
-				if (createResource) await _getMongoCompetitionAggregatedView(mongo, scope, requestedId, id);
-				send200(
-					res,
-					{
-						status: 200,
-						service: config?.serviceName,
-						message: `Materialised aggregation views created for ${createResource ? 'new' : 'existing'} ${schemaType} ${scope}/${requestedId}`,
-					},
-					config
-				);
-				return;
-			case 'stages':
-				if (createResource) await _getMongoStageAggregatedView(mongo, scope, requestedId, id);
-				send200(
-					res,
-					{
-						status: 200,
-						service: config?.serviceName,
-						message: `Materialised aggregation views created for ${createResource ? 'new' : 'existing'} ${schemaType} ${scope}/${requestedId}`,
-					},
-					config
-				);
-				return;
-			case 'events':
-				if (createResource) await _getMongoEventAggregatedView(mongo, scope, requestedId, id);
-				if (createResource) await _getMongoEventsAndKeyMomentsAggregatedView(mongo, scope, requestedId, id);
-				send200(
-					res,
-					{
-						status: 200,
-						service: config?.serviceName,
-						message: `Materialised aggregation views created for ${createResource ? 'new' : 'existing'} ${schemaType} ${scope}/${requestedId}`,
-					},
-					config
-				);
-				return;
-			case 'clubs':
-			case 'rankings':
-			case 'keymoments':
-			case 'sportspersons':
-			case 'teams':
-			case 'venues':
-			case 'stickies':
-			case 'relationships':
-			case 'staff':
-			case 'stories':
-			case 'nations':
-			case 'sgos':
-			default:
-				warn(`No valid Schema found when trying to get: ${schemaType}`, 'WD0040', 400, 'Invalid Schema');
-				send400(res, {
-					message: 'Please specify a valid schema type.',
-					errorCode: 'WD0040', // TODO: Error codes should be documented in a central location and not as magic numbers in code
-					category: 'Invalid Schema',
-				});
-				return;
+		let response;
+		//////////////////////////////////////////////////////////////////////////////
+		// Route the request to the appropriate processor based on the schema type
+		////////////////////////////////////////////////////////////////////////////
+		// COMPETITIONS
+		if (schemaType.toLowerCase() == 'competitions') {
+			response = await processCompetition(config, mongo, scope, requestedId, id);
 		}
+		////////////////////////////////////////////////////////////////////////////
+		// STAGES
+		if (schemaType.toLowerCase() == 'stages') {
+			response = await processStage(config, mongo, scope, requestedId, id);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// ALL OTHERS NOT YET SUPPORTED
+		else {
+			warn(`No valid Schema found when trying to get: ${schemaType}`, 'WD0040', 400, 'Invalid Schema');
+			send400(res, {
+				message: 'Please specify a valid schema type.',
+				errorCode: 'WD0040',
+				category: 'Invalid Schema',
+			});
+			return;
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// Return the result
+		const body = {
+			status: 200,
+			service: config?.serviceName,
+			message: `Materialised aggregation views created for ${createResource ? 'new' : 'existing'} ${schemaType} ${scope}/${requestedId}`,
+			response,
+		};
+		send200(res, body, config);
 	} catch (err) {
 		send500(res, err.message);
 		return;
 	}
-	//////////////////////////////////////////////////////////////////////////////
 }
+
 ////////////////////////////////////////////////////////////////////////////////
 /**
  * Build and execute an aggregation pipeline to materialize a competition view in MongoDB.

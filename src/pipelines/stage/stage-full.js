@@ -10,7 +10,7 @@ const targetType = [`sgo`, `competition`, `event`, `venue`, `team`, `sportsPerso
 const keyInAggregation = ['resourceType', '_externalIdScope', '_externalId', 'targetType'];
 
 ////////////////////////////////////////////////////////////////////////////////
-const pipeline = (STAGE_SCOPE, STAGE_ID) => [
+const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 	//////////////////////////////////////////////////////////////////////////////
 	//$match: filters by _externalId and _externalIdScope (COMP_ID, COMP_SCOPE)
 	{ $match: { _externalId: STAGE_ID, _externalIdScope: STAGE_SCOPE } },
@@ -91,7 +91,7 @@ const pipeline = (STAGE_SCOPE, STAGE_ID) => [
 	//////////////////////////////////////////////////////////////////////////////
 	{
 		$merge: {
-			into: 'materialisedAggregations',
+			into: config?.mongo?.matAggCollectionName || 'materialisedAggregations',
 			on: keyInAggregation,
 			whenMatched: 'replace',
 			whenNotMatched: 'insert',
@@ -100,4 +100,9 @@ const pipeline = (STAGE_SCOPE, STAGE_ID) => [
 ];
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = pipeline;
+function getStageQueryToFindMergedDocument(stageId, stageIdScope) {
+	return { resourceType: 'stage', _externalIdScope: stageIdScope, _externalId: stageId, targetType };
+}
+
+////////////////////////////////////////////////////////////////////////////////
+module.exports = { pipeline, getStageQueryToFindMergedDocument };
