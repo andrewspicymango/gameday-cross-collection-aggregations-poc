@@ -11,6 +11,7 @@ const runPipeline = require('../pipelines/runPipeline.js');
 const { processCompetition } = require('../pipelines/competition/competitionAggregationBuild.js');
 const { processStage } = require('../pipelines/stage/stageAggregationBuild.js');
 const { processEvent } = require('../pipelines/event/eventAggregationBuild.js');
+const { processTeam } = require('../pipelines/team/teamAggregationBuild.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -22,6 +23,8 @@ const { processEvent } = require('../pipelines/event/eventAggregationBuild.js');
 // curl -X POST localhost:8080/1-0/aggregate/events/bblapi/6ea116b7-7c38-47b3-a1ee-db90108034b2?create=false
 // curl -X POST localhost:8080/1-0/aggregate/competitions/fifa/289175?create=true
 // curl -X POST localhost:8080/1-0/aggregate/events/fifa/146186?create=false
+
+// curl -X POST localhost:8080/1-0/aggregate/teams/bblapi/9a259543-a5a3-4f51-b352-9ceeffb4ae15
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -155,6 +158,11 @@ async function buildMaterialisedViewController(req, res) {
 		// EVENTS
 		else if (schemaType.toLowerCase() == 'events') {
 			response = await processEvent(config, mongo, scope, requestedId, id);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// TEAMS
+		else if (schemaType.toLowerCase() == 'teams') {
+			response = await processTeam(config, mongo, scope, requestedId, id);
 		}
 		////////////////////////////////////////////////////////////////////////////
 		// ALL OTHERS NOT YET SUPPORTED
