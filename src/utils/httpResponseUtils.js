@@ -92,11 +92,11 @@ const send200 = function (res, responseStringOrObject, config, type = 'json') {
 	const body = _.isObject(responseStringOrObject)
 		? JSON.stringify(responseStringOrObject, null, 3) + '\n'
 		: JSON.stringify({ status: 200, message: `${responseStringOrObject}` }, null, 3);
-	// if (config?.server?.accessControlAllowOrigin != null) {
-	// 	res.type(type).status(200).append('Access-Control-Allow-Origin', config.server.accessControlAllowOrigin).send(body);
-	// } else {
-	res.type(type).status(200).send(body);
-	// }
+	if (config?.server?.accessControlAllowOrigin != null) {
+		res.type(type).status(200).append('Access-Control-Allow-Origin', config.server.accessControlAllowOrigin).send(body);
+	} else {
+		res.type(type).status(200).send(body);
+	}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
