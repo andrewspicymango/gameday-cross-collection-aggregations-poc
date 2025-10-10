@@ -3,39 +3,57 @@ const { debug } = require('../log');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Update resource reference arrays in a materialized aggregation collection when an aggregation reference
- * (the document identified by an external scope + id) moves from one external id/scope to another.
+ * Update references to a resource across aggregation documents in a materialized-aggregation collection.
  *
- * The function:
- * - Validates inputs and required configuration.
- * - Determines which reference fields to manage based on resourceReferenceType (e.g. 'competition' -> { competitions, competitionKeys }).
- * - If the old aggregation root exists (has both scope and id) it issues a $pull update to remove the resource id/key from that aggregation document.
- * - If the new aggregation root exists (has both scope and id) it issues an $addToSet update (with upsert: true) to add the resource id/key to that aggregation document.
- * - Sets lastUpdated on any modified aggregation document.
- * - Executes the updates as a single bulkWrite operation when there are any operations to perform.
- * - No-op and returns early when the root scope/id did not change (no work required).
+ * This function validates inputs, determines whether a resource reference needs to be moved
+ * from one aggregation root to another (based on id + scope differences), and prepares MongoDB
+ * bulkWrite operations to:
+ *   - $pull the reference fields from the old aggregation document (if old id/scope provided)
+ *   - $addToSet the reference fields into the new aggregation document (if new id/scope provided)
+ * Each write also sets a `lastUpdated` timestamp. The new aggregation write uses upsert: true.
+ *
+ * The mapping between resourceReferenceType and the fields updated in the aggregation documents is:
+ *   - "competition"     => { competitions, competitionKeys }
+ *   - "stage"           => { stages, stageKeys }
+ *   - "event"           => { events, eventKeys }
+ *   - "sgo"             => { sgos, sgoKeys }
+ *   - "team"            => { teams, teamKeys }
+ *   - "sportsPerson"    => { sportsPersons, sportsPersonKeys }
+ *   - "venue"           => { venues, venueKeys }
+ *   - "keyMoment"       => { keyMoments, keyMomentKeys }
  *
  * Notes:
- * - For the "remove" operation a $pull is used; for the "add" operation $addToSet is used to avoid duplicates.
- * - The "add" operation uses upsert: true so a missing aggregation document for the new root will be created.
- * - The function logs a debug message after a successful bulkWrite.
+ *   - If aggregationForOld and aggregationForNew have the same id and scope, the function is a no-op.
+ *   - Bulk operations are only executed when there is at least one update to perform.
+ *   - The function expects config.mongo.matAggCollectionName to be a string and uses mongo.db.collection(...) to run bulkWrite.
  *
  * @async
- * @function updateResourceReferencesInAggregationDoc
- * @param {Object} mongo - MongoDB helper object exposing .db.collection(...).bulkWrite(...)
- * @param {Object} config - Configuration object. Must contain mongo.matAggCollectionName (string).
- * @param {string} aggregationForResourceType - Resource type of the aggregation root (used to match documents by resourceType).
- * @param {{scope: string, id: string}} aggregationForOld - Previous external id + scope identifying the aggregation root to remove the reference from.
- * @param {{scope: string, id: string}} aggregationForNew - New external id + scope identifying the aggregation root to add the reference to.
- * @param {string} aggregationForTargetType - Target type of the aggregation root (used to match documents by targetType).
- * @param {string} resourceReferenceType - Type of the referenced resource (one of the supported values listed above).
- * @param {string|Object} resourceReferenceObjectId - The resource object id to add/remove from the aggregation arrays (may be ObjectId or string).
- * @param {string} resourceReferenceKey - The external key for the resource to add/remove from the corresponding "...Keys" array.
- * @param {string} [requestId] - Optional request id used for logging; defaults to 'no-request-id-provided' when not supplied.
+ * @param {Object} mongo - Mongo wrapper exposing a `db` property with a `collection(name)` function that supports bulkWrite.
+ * @param {Object} config - Configuration object.
+ * @param {Object} config.mongo - Mongo-specific configuration.
+ * @param {string} config.mongo.matAggCollectionName - Name of the materialized aggregation collection to update.
+ * @param {string} aggregationForResourceType - The resource type of the aggregation documents to update (e.g. "match", "fixture").
+ * @param {Object} aggregationForOld - The current (old) aggregation root identifier.
+ * @param {(string|number|null)} aggregationForOld.id - The external id of the old aggregation root (may be null/undefined to indicate absence).
+ * @param {(string|null)} aggregationForOld.scope - The scope/namespace of the old aggregation root (may be null/undefined to indicate absence).
+ * @param {Object} aggregationForNew - The target (new) aggregation root identifier.
+ * @param {(string|number|null)} aggregationForNew.id - The external id of the new aggregation root (may be null/undefined to indicate absence).
+ * @param {(string|null)} aggregationForNew.scope - The scope/namespace of the new aggregation root (may be null/undefined to indicate absence).
+ * @param {string} aggregationForTargetType - The targetType value that aggregation documents must have to be considered.
+ * @param {string} resourceReferenceType - The type of resource being referenced (must be one of the documented mapping keys above).
+ * @param {*} resourceReferenceObjectId - The stored object id/value for the resource reference (e.g. ObjectId or primitive id).
+ * @param {string} resourceReferenceKey - The key/string identifier associated with the resource reference (stored alongside the id).
+ * @param {string} [requestId] - Optional request identifier for logging/debugging. Defaults to 'no-request-id-provided' if not provided.
  *
- * @throws {Error} When required arguments are missing or invalid (including missing config.mongo.matAggCollectionName or invalid parameter types).
+ * @throws {Error} If required parameters are missing or of the wrong type. Specific checks:
+ *   - config.mongo.matAggCollectionName must be a string
+ *   - aggregationForResourceType and aggregationForTargetType must be strings
+ *   - aggregationForOld and aggregationForNew must be objects
+ *   - resourceReferenceType must be a string
+ *   - resourceReferenceObjectId must be provided
+ *   - resourceReferenceKey must be a string
  *
- * @returns {Promise<void>} Resolves when the bulk operation (if any) has completed. If no update is required the promise resolves immediately.
+ * @returns {Promise<void>} Resolves when any necessary bulkWrite operations have completed.
  */
 async function updateResourceReferencesInAggregationDoc(
 	mongo,
@@ -80,7 +98,7 @@ async function updateResourceReferencesInAggregationDoc(
 
 	////////////////////////////////////////////////////////////////////////////
 	// Remove from old aggregation for root (if exists)
-	if (aggregationForOld.id && aggregationForOld.scope) {
+	if (aggregationForOld?.id != null && aggregationForOld?.scope != null) {
 		filter._externalIdScope = aggregationForOld.scope;
 		filter._externalId = aggregationForOld.id;
 		const update = { $pull: referenceToManage, $set: { lastUpdated: new Date() } };
@@ -88,7 +106,7 @@ async function updateResourceReferencesInAggregationDoc(
 	}
 	///////////////////////////////////////////////////////////////////////////
 	// Add to new aggregation for root (if exists)
-	if (aggregationForNew.id && aggregationForNew.scope) {
+	if (aggregationForNew?.id != null && aggregationForNew?.scope != null) {
 		filter._externalIdScope = aggregationForNew.scope;
 		filter._externalId = aggregationForNew.id;
 		const update = { $addToSet: referenceToManage, $set: { lastUpdated: new Date() } };
@@ -98,7 +116,7 @@ async function updateResourceReferencesInAggregationDoc(
 	// Execute bulk operations if any
 	if (operations.length > 0) {
 		await mongo.db.collection(config.mongo.matAggCollectionName).bulkWrite(operations);
-		debug(`Updated competition references for stage ${stageKey}`, requestId);
+		debug(`Updated ${aggregationForResourceType} aggregation references for ${resourceReferenceType} ${resourceReferenceKey}`, requestId);
 	}
 }
 

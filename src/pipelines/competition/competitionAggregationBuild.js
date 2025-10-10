@@ -8,7 +8,7 @@ const _ = require('lodash');
 const { debug } = require('../../log');
 const { runPipeline } = require('../runPipeline');
 const { pipeline } = require('./competitionAggregationPipeline');
-const { getCompetitionQueryToFindMergedDocument } = require('./competitionAggregationPipeline');
+const { queryForCompetitionAggregationDoc } = require('./competitionAggregationPipeline');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Process competition updates
@@ -16,9 +16,9 @@ async function processCompetition(config, mongo, competitionIdScope, competition
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!competitionId || !competitionIdScope) throw new Error('Invalid parameters: competitionId and competitionIdScope are required');
 	//////////////////////////////////////////////////////////////////////////////
-	debug(`processCompetition: competitionIdScope=${competitionIdScope}, competitionId=${competitionId}`, requestId);
+	debug(`competitionIdScope=${competitionIdScope}, competitionId=${competitionId}`, requestId);
 	const pipelineObj = pipeline(config, competitionIdScope, competitionId);
-	const query = getCompetitionQueryToFindMergedDocument(competitionId, competitionIdScope);
+	const query = queryForCompetitionAggregationDoc(competitionId, competitionIdScope);
 	await runPipeline(mongo, 'competitions', pipelineObj, requestId);
 	const doc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(query);
 	return doc;

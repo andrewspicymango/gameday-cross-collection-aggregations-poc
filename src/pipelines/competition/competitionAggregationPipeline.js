@@ -1,25 +1,53 @@
 const { competitionMetaFacet } = require('./competitionMetaFacet');
-const { competitionEventsFacet } = require('./competitionEventsFacet');
 const { competitionSgoFacet } = require('./competitionSgoFacet');
 const { competitionStagesFacet } = require('./competitionStagesFacet');
-const { competitionTeamsFacet } = require('./competitionTeamsFacet');
-const { competitionSportsPersonsFacet } = require('./competitionSportsPersonsFacet');
-const { competitionVenuesFacet } = require('./competitionVenuesFacet');
-const competitionAggregationTargetType = [`sgo`, `stage`, `event`, `venue`, `team`, `sportsPerson`].join('/');
+const competitionAggregationTargetType = [`sgo`, `stage`].join('/');
 const keyInAggregation = ['resourceType', '_externalIdScope', '_externalId', 'targetType'];
 
 ////////////////////////////////////////////////////////////////////////////////
-
 /**
- * Builds a MongoDB aggregation pipeline to materialise a competition document by
- * matching external id/scope, running facets (sgos, stages, events, teams,
- * sportsPersons, venues, meta), normalising outputs, stamping metadata and merging
- * into the configured materialised collection.
+ * Builds a MongoDB aggregation pipeline for producing a materialised competition aggregation document.
  *
- * @param {Object} config - configuration object (expects config.mongo.matAggCollectionName)
- * @param {string} COMP_SCOPE - external id scope to match
- * @param {string|number} COMP_ID - external id to match
- * @returns {Array<Object>} MongoDB aggregation pipeline stages
+ * The pipeline:
+ * 1. $match: Filters the collection by the provided external competition identifier and scope.
+ * 2. $facet: Executes multiple parallel sub-pipelines (facets) to produce structured pieces of data:
+ *    - competitionSgoFacet (sgos)
+ *    - competitionStagesFacet (stages)
+ *    - competitionMetaFacet (meta)
+ * 3. $project: Normalises the facet results by extracting the first/meta values and ensuring expected
+ *    outputs are arrays (defaults to empty arrays). Projects:
+ *    - gamedayId        : first value from meta._id
+ *    - _externalId      : first value from meta.competitionId
+ *    - _externalIdScope : first value from meta.competitionIdScope
+ *    - resourceType     : first value from meta.resourceType
+ *    - sgos             : first sgos.ids or []
+ *    - sgoKeys          : first sgos.keys or []
+ *    - stages           : first stages.ids or []
+ *    - stageKeys        : first stages.keys or []
+ * 4. $addFields: Adds/normalises top-level fields for the aggregation document:
+ *    - preserves gamedayId, resourceType, _externalId, _externalIdScope
+ *    - sets targetType to competitionAggregationTargetType (external constant)
+ *    - sets lastUpdated to $$NOW (pipeline execution time)
+ * 5. $merge: Writes the resulting document into a materialised aggregations collection (config-driven name
+ *    or 'materialisedAggregations' fallback). Merge behavior:
+ *    - into: config?.mongo?.matAggCollectionName || 'materialisedAggregations'
+ *    - on: keyInAggregation (external key definition)
+ *    - whenMatched: 'replace'
+ *    - whenNotMatched: 'insert'
+ *
+ * Notes:
+ * - The pipeline depends on external constants/objects: competitionSgoFacet, competitionStagesFacet,
+ *   competitionMetaFacet, competitionAggregationTargetType, and keyInAggregation. These must be in scope
+ *   where the pipeline is constructed/executed.
+ * - lastUpdated uses the aggregation variable $$NOW to capture the pipeline execution time.
+ *
+ * @function pipeline
+ * @param {Object} config - Optional runtime configuration. Expected shape (partial):
+ *   { mongo: { matAggCollectionName?: string } }
+ * @param {string|number} COMP_SCOPE - External identifier scope used to filter competition documents.
+ * @param {string|number} COMP_ID - External competition identifier used to filter competition documents.
+ * @returns {Array<Object>} MongoDB aggregation pipeline (array of stages) that, when executed,
+ *   produces/updates a single materialised aggregation document for the specified competition.
  */
 const pipeline = (config, COMP_SCOPE, COMP_ID) => [
 	//////////////////////////////////////////////////////////////////////////////
@@ -32,10 +60,6 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
 		$facet: {
 			sgos: competitionSgoFacet,
 			stages: competitionStagesFacet,
-			events: competitionEventsFacet,
-			teams: competitionTeamsFacet,
-			sportsPersons: competitionSportsPersonsFacet,
-			venues: competitionVenuesFacet,
 			meta: competitionMetaFacet,
 		},
 	},
@@ -60,38 +84,13 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
 			stageKeys: {
 				$ifNull: [{ $first: '$stages.keys' }, []],
 			},
-			events: {
-				$ifNull: [{ $first: '$events.ids' }, []],
-			},
-			eventKeys: {
-				$ifNull: [{ $first: '$events.keys' }, []],
-			},
-			teams: {
-				$ifNull: [{ $first: '$teams.ids' }, []],
-			},
-			teamKeys: {
-				$ifNull: [{ $first: '$teams.keys' }, []],
-			},
-			sportsPersons: {
-				$ifNull: [{ $first: '$sportsPersons.ids' }, []],
-			},
-			sportsPersonKeys: {
-				$ifNull: [{ $first: '$sportsPersons.keys' }, []],
-			},
-			venues: {
-				$ifNull: [{ $first: '$venues.ids' }, []],
-			},
-			venueKeys: {
-				$ifNull: [{ $first: '$venues.keys' }, []],
-			},
 		},
 	},
 
 	//////////////////////////////////////////////////////////////////////////////
-	// $addFields: sets output metadata (resourceType, _externalId, _externalIdScope, targetType)
-	// and stamps lastUpdated with $$NOW (pipeline execution time)
 	{
 		$addFields: {
+			gamedayId: '$gamedayId',
 			resourceType: '$resourceType',
 			_externalId: '$_externalId',
 			_externalIdScope: '$_externalIdScope',
@@ -127,9 +126,9 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
  *  - _externalIdScope: compScope
  *  - targetType: value taken from the surrounding scope
  */
-function getCompetitionQueryToFindMergedDocument(competitionId, competitionIdScope) {
+function queryForCompetitionAggregationDoc(competitionId, competitionIdScope) {
 	return { resourceType: 'competition', _externalIdScope: competitionIdScope, _externalId: competitionId, targetType: competitionAggregationTargetType };
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = { pipeline, getCompetitionQueryToFindMergedDocument, competitionAggregationTargetType };
+module.exports = { pipeline, queryForCompetitionAggregationDoc, competitionAggregationTargetType };

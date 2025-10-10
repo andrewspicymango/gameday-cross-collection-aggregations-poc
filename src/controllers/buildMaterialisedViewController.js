@@ -168,6 +168,14 @@ async function buildMaterialisedViewController(req, res) {
 			return;
 		}
 		////////////////////////////////////////////////////////////////////////////
+		// If we have a 404 from the processor, return that
+		if (response === 404) {
+			debug(`404: No ${schemaType} found for id ${requestedId} and scope ${scope}`, id);
+			send404(res, `No ${schemaType} found for id ${requestedId} and scope ${scope}`);
+			return;
+		}
+
+		////////////////////////////////////////////////////////////////////////////
 		// Return the result
 		const body = {
 			status: 200,

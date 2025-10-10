@@ -18,10 +18,10 @@ const _ = require('lodash');
 const { debug } = require('../../log');
 const { runPipeline } = require('../runPipeline');
 const { splitKey } = require('../splitKey');
-const { processCompetition } = require('../competition/competitionAggregationBuild');
-const { processStage } = require('../stage/stageAggregationBuild');
+const { keySeparator } = require('../constants');
 const { pipeline } = require('./eventAggregationPipeline');
-const { getEventQueryToFindMergedDocument } = require('./eventAggregationPipeline');
+const { queryForEventAggregationDoc } = require('./eventAggregationPipeline');
+const { updateResourceReferencesInAggregationDoc } = require('../updateResourceReferencesInAggregationDoc');
 const { stageAggregationTargetType } = require('../stage/stageAggregationPipeline');
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -29,14 +29,22 @@ async function processEvent(config, mongo, eventIdScope, eventId, requestId) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!eventId || !eventIdScope) throw new Error('Invalid parameters: eventId and eventIdScope are required');
 	//////////////////////////////////////////////////////////////////////////////
-	debug(`processEvent: eventIdScope=${eventIdScope}, eventId=${eventId}`, requestId);
+	debug(`eventIdScope=${eventIdScope}, eventId=${eventId}`, requestId);
+	//////////////////////////////////////////////////////////////////////////////
+	// Check if event exists before running expensive pipeline
+	const eventExists = await mongo.db.collection('events').countDocuments({ _externalId: eventId, _externalIdScope: eventIdScope }, { limit: 1 });
+	//////////////////////////////////////////////////////////////////////////////
+	if (eventExists === 0) {
+		debug(`Event not found: ${eventId}@${eventIdScope}`, requestId);
+		return 404;
+	}
+
 	//////////////////////////////////////////////////////////////////////////////
 	const pipelineObj = pipeline(config, eventIdScope, eventId);
-	const eventAggregationDocQuery = getEventQueryToFindMergedDocument(eventId, eventIdScope);
+	const eventAggregationDocQuery = queryForEventAggregationDoc(eventId, eventIdScope);
 	//////////////////////////////////////////////////////////////////////////////
 	// Retrieve the previous version of the event aggregation (if it exists) and calculate old competition and stage keys
 	const oldAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(eventAggregationDocQuery);
-	const oldCompetitionIdAndScope = splitKey(oldAggregationDoc?.competitionKeys[0]);
 	const oldStageIdAndScope = splitKey(oldAggregationDoc?.stageKeys[0]);
 	//////////////////////////////////////////////////////////////////////////////
 	// Build the event aggregation view
@@ -44,18 +52,27 @@ async function processEvent(config, mongo, eventIdScope, eventId, requestId) {
 	//////////////////////////////////////////////////////////////////////////////
 	// Retrieve the new version of the event aggregation and calculate new competition and stage keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(eventAggregationDocQuery);
-	const newCompetitionIdAndScope = splitKey(newAggregationDoc?.competitionKeys[0]);
 	const newStageIdAndScope = splitKey(newAggregationDoc?.stageKeys[0]);
+	const eventObjectId = newAggregationDoc?.gamedayId;
+	const eventKey = `${eventId}${keySeparator}${eventIdScope}`;
+
 	//////////////////////////////////////////////////////////////////////////////
-	// Determine update strategy based on scale and complexity
-	const needsStageUpdate = oldStageIdAndScope.id !== newStageIdAndScope.id || oldStageIdAndScope.scope !== newStageIdAndScope.scope;
-	const needsCompetitionUpdate = oldCompetitionIdAndScope.id !== newCompetitionIdAndScope.id || oldCompetitionIdAndScope.scope !== newCompetitionIdAndScope.scope;
+	// FIX UPWARDS REFERENCES
 	//////////////////////////////////////////////////////////////////////////////
-	if (needsStageUpdate) {
-		const eventAggregationObjectId = newAggregationDoc._id;
-		const eventKey = `${eventId}${keySeparator}${eventIdScope}`;
-		await updateStageEventReferences(mongo, config, { oldStageIdAndScope, newStageIdAndScope, eventAggregationObjectId, eventKey, eventData: newAggregationDoc, requestId });
-	}
+	// The event may have moved stages if either the stage id or scope has changed
+	// So we may need to update stage aggregations
+	await updateResourceReferencesInAggregationDoc(
+		mongo,
+		config,
+		'stage',
+		oldStageIdAndScope,
+		newStageIdAndScope,
+		stageAggregationTargetType,
+		'event',
+		eventObjectId,
+		eventKey,
+		requestId
+	);
 
 	return newAggregationDoc;
 }

@@ -51,7 +51,20 @@
 			"es6": true
 		}
 	},
-	"cSpell.words": ["Behaviour", "Gameday", "Healthcheck", "materialise", "materialised", "normalising", "sgos"],
+	"cSpell.words": [
+		"Behaviour",
+		"Behavioural",
+		"Gameday",
+		"Healthcheck",
+		"materialise",
+		"materialised",
+		"materialises",
+		"Normalises",
+		"normalising",
+		"sgos",
+		"upserting",
+		"upserts"
+	],
 	"cSpell.ignorePaths": ["scratch/**", "**/*.log", "**/*.psv", "node_modules/**", ".git/**", ".gitignore", "./.vscode/**", "package-lock.json", "yarn.lock"],
 	"files.associations": {
 		"*.jsonc": "jsonc",

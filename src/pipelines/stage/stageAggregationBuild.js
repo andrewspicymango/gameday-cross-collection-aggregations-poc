@@ -20,7 +20,7 @@ const { keySeparator } = require('../constants');
 const { runPipeline } = require('../runPipeline');
 const { splitKey } = require('../splitKey');
 const { pipeline } = require('./stageAggregationPipeline');
-const { getStageQueryToFindMergedDocument } = require('./stageAggregationPipeline');
+const { queryForStageAggregationDoc } = require('./stageAggregationPipeline');
 const { updateResourceReferencesInAggregationDoc } = require('../updateResourceReferencesInAggregationDoc');
 const { competitionAggregationTargetType } = require('../competition/competitionAggregationPipeline');
 
@@ -47,7 +47,7 @@ const { competitionAggregationTargetType } = require('../competition/competition
  *
  * Side effects:
  * - Reads and writes to the configured materialized aggregation collection.
- * - Invokes external functions: `pipeline`, `getStageQueryToFindMergedDocument`,
+ * - Invokes external functions: `pipeline`, `queryForStageAggregationDoc`,
  *   `runPipeline`, and `processCompetition`.
  * - Relies on a module-level `keySeparator` to split competition keys.
  *
@@ -68,10 +68,10 @@ async function processStage(config, mongo, stageIdScope, stageId, requestId) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!stageId || !stageIdScope) throw new Error('Invalid parameters: stageId and stageIdScope are required');
 	//////////////////////////////////////////////////////////////////////////////
-	debug(`processStage: stageIdScope=${stageIdScope}, stageId=${stageId}`, requestId);
+	debug(`stageIdScope=${stageIdScope}, stageId=${stageId}`, requestId);
 	//////////////////////////////////////////////////////////////////////////////
 	const pipelineObj = pipeline(config, stageIdScope, stageId);
-	const stageAggregationDocQuery = getStageQueryToFindMergedDocument(stageId, stageIdScope);
+	const stageAggregationDocQuery = queryForStageAggregationDoc(stageId, stageIdScope);
 	//////////////////////////////////////////////////////////////////////////////
 	// Retrieve the previous version of the stage aggregation (if it exists) and calculate old competition keys
 	const oldAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(stageAggregationDocQuery);
@@ -100,6 +100,7 @@ async function processStage(config, mongo, stageIdScope, stageId, requestId) {
 		stageKey,
 		requestId
 	);
+	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
 }
 
