@@ -1,5 +1,5 @@
 const _ = require('lodash');
-const { debug } = require('../../log');
+const { debug } = require('../log');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -69,13 +69,13 @@ async function updateResourceReferencesInAggregationDoc(
 	if (!needsUpdate) return;
 	let referenceToManage = {};
 	if (resourceReferenceType === 'competition') referenceToManage = { competitions: resourceReferenceObjectId, competitionKeys: resourceReferenceKey };
-	if (resourceReferenceType === 'stage') referenceToManage = { stages: resourceReferenceObjectId, stageKeys: resourceReferenceKey };
-	if (resourceReferenceType === 'event') referenceToManage = { events: resourceReferenceObjectId, eventKeys: resourceReferenceKey };
-	if (resourceReferenceType === 'sgo') referenceToManage = { sgos: resourceReferenceObjectId, sgoKeys: resourceReferenceKey };
-	if (resourceReferenceType === 'team') referenceToManage = { teams: resourceReferenceObjectId, teamKeys: resourceReferenceKey };
-	if (resourceReferenceType === 'sportsPerson') referenceToManage = { sportsPersons: resourceReferenceObjectId, sportsPersonKeys: resourceReferenceKey };
-	if (resourceReferenceType === 'venue') referenceToManage = { venues: resourceReferenceObjectId, venueKeys: resourceReferenceKey };
-	if (resourceReferenceType === 'keyMoment') referenceToManage = { keyMoments: resourceReferenceObjectId, keyMomentKeys: resourceReferenceKey };
+	else if (resourceReferenceType === 'stage') referenceToManage = { stages: resourceReferenceObjectId, stageKeys: resourceReferenceKey };
+	else if (resourceReferenceType === 'event') referenceToManage = { events: resourceReferenceObjectId, eventKeys: resourceReferenceKey };
+	else if (resourceReferenceType === 'sgo') referenceToManage = { sgos: resourceReferenceObjectId, sgoKeys: resourceReferenceKey };
+	else if (resourceReferenceType === 'team') referenceToManage = { teams: resourceReferenceObjectId, teamKeys: resourceReferenceKey };
+	else if (resourceReferenceType === 'sportsPerson') referenceToManage = { sportsPersons: resourceReferenceObjectId, sportsPersonKeys: resourceReferenceKey };
+	else if (resourceReferenceType === 'venue') referenceToManage = { venues: resourceReferenceObjectId, venueKeys: resourceReferenceKey };
+	else if (resourceReferenceType === 'keyMoment') referenceToManage = { keyMoments: resourceReferenceObjectId, keyMomentKeys: resourceReferenceKey };
 	const filter = { resourceType: aggregationForResourceType, targetType: aggregationForTargetType };
 
 	////////////////////////////////////////////////////////////////////////////
