@@ -105,6 +105,13 @@ async function main() {
 			info(`Index ${config.mongo.matAggIndexIdAndScopeName} exists on collection ${config.mongo.matAggCollectionName}`);
 		}
 
+		////////////////////////////////////////////////////////////////////////////
+		const session = mongo.client.startSession();
+		if (session.id) info(`Mongo sessions supported`);
+		else throw new Error('Mongo sessions not supported');
+		await session.endSession();
+
+		////////////////////////////////////////////////////////////////////////////
 		// Create Express app
 		const app = express();
 		app.use(express.json());
