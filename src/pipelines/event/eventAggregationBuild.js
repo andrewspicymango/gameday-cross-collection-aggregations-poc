@@ -17,12 +17,10 @@
 const _ = require('lodash');
 const { debug } = require('../../log');
 const { runPipeline } = require('../runPipeline');
-const { splitKey } = require('../splitKey');
 const { keySeparator } = require('../constants');
+const { updateResourceReferencesInAggregationDocs } = require('../updateResourceReferencesInAggregationDocs');
 const { pipeline } = require('./eventAggregationPipeline');
 const { queryForEventAggregationDoc } = require('./eventAggregationPipeline');
-const { updateResourceReferencesInAggregationDoc } = require('../updateResourceReferencesInAggregationDoc');
-const { stageAggregationTargetType } = require('../stage/stageAggregationPipeline');
 
 ////////////////////////////////////////////////////////////////////////////////
 async function processEvent(config, mongo, eventIdScope, eventId, requestId) {
@@ -44,69 +42,38 @@ async function processEvent(config, mongo, eventIdScope, eventId, requestId) {
 	const eventAggregationDocQuery = queryForEventAggregationDoc(eventId, eventIdScope);
 	//////////////////////////////////////////////////////////////////////////////
 	// Retrieve the previous version of the event aggregation (if it exists) and calculate old competition and stage keys
+	// A event has outbound references to:
+	// - stage
+	// - event
+	// - teams (via participants)
+	// - sportsPersons (via participants)
 	const oldAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(eventAggregationDocQuery);
-	const oldStageIdAndScope = splitKey(oldAggregationDoc?.stageKeys[0]);
+	const oldStageExternalKey = oldAggregationDoc?.stageKeys[0];
+	const oldVenueExternalKey = oldAggregationDoc?.venueKeys[0];
+	// TODO: teams and sportsPersons
 	//////////////////////////////////////////////////////////////////////////////
 	// Build the event aggregation view
 	await runPipeline(mongo, 'events', pipelineObj, requestId);
 	//////////////////////////////////////////////////////////////////////////////
 	// Retrieve the new version of the event aggregation and calculate new competition and stage keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(eventAggregationDocQuery);
-	const newStageIdAndScope = splitKey(newAggregationDoc?.stageKeys[0]);
+	//////////////////////////////////////////////////////////////////////////////
+	// FIX OUTBOUND REFERENCES
 	const eventObjectId = newAggregationDoc?.gamedayId;
 	const eventKey = `${eventId}${keySeparator}${eventIdScope}`;
-
+	const eventResourceReference = { resourceType: 'event', externalKey: eventKey, objectId: eventObjectId };
 	//////////////////////////////////////////////////////////////////////////////
-	// FIX UPWARDS REFERENCES
+	// _externalStageId
+	const newStageExternalKey = newAggregationDoc?.stageKeys[0];
+	const stageAggregationDoc = { resourceType: 'stage', externalKey: { old: oldStageExternalKey || null, new: newStageExternalKey || null } };
+	await updateResourceReferencesInAggregationDocs(mongo, config, stageAggregationDoc, eventResourceReference, requestId);
 	//////////////////////////////////////////////////////////////////////////////
-	// The event may have moved stages if either the stage id or scope has changed
-	// So we may need to update stage aggregations
-	await updateResourceReferencesInAggregationDoc(
-		mongo,
-		config,
-		'stage',
-		oldStageIdAndScope,
-		newStageIdAndScope,
-		stageAggregationTargetType,
-		'event',
-		eventObjectId,
-		eventKey,
-		requestId
-	);
-
+	// _externalVenueId
+	const newVenueExternalKey = newAggregationDoc?.venueKeys[0];
+	const venueAggregationDocs = { resourceType: 'venue', externalKey: { old: oldVenueExternalKey || null, new: newVenueExternalKey || null } };
+	await updateResourceReferencesInAggregationDocs(mongo, config, venueAggregationDocs, eventResourceReference, requestId);
+	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-async function updateStageEventReferences(mongo, config, { oldStageIdAndScope, newStageIdAndScope, eventObjectId, eventKey, eventData, requestId }) {
-	const operations = [];
-	//////////////////////////////////////////////////////////////////////////////
-	// Remove from old stage (if exists)
-	if (oldStageIdAndScope.id && oldStageIdAndScope.scope) {
-		operations.push({
-			updateOne: {
-				filter: { resourceType: 'stage', _externalId: oldStageIdAndScope.id, _externalIdScope: oldStageIdAndScope.scope, targetType: stageAggregationTargetType },
-				update: { $pull: { events: { _id: eventObjectId }, eventKeys: eventKey }, $set: { lastUpdated: new Date() } },
-			},
-		});
-	}
-	//////////////////////////////////////////////////////////////////////////////
-	// Add to new stage (if different)
-	if (newStage.id && newStage.scope) {
-		operations.push({
-			updateOne: {
-				filter: { resourceType: 'stage', _externalId: newStageIdAndScope.id, _externalIdScope: newStageIdAndScope.scope, targetType: stageAggregationTargetType },
-				update: { $addToSet: { events: { _id: eventObjectId }, eventKeys: eventKey }, $set: { lastUpdated: new Date() } },
-				upsert: true,
-			},
-		});
-	}
-	//////////////////////////////////////////////////////////////////////////////
-	// Execute bulk operations if any
-	if (operations.length > 0) {
-		await mongo.db.collection(config.mongo.matAggCollectionName).bulkWrite(operations);
-		debug(`Updated stage references for event ${eventKey}`, requestId);
-	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////

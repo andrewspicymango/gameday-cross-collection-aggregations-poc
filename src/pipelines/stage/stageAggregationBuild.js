@@ -18,11 +18,9 @@ const _ = require('lodash');
 const { debug } = require('../../log');
 const { keySeparator } = require('../constants');
 const { runPipeline } = require('../runPipeline');
-const { splitKey } = require('../splitKey');
+const { updateResourceReferencesInAggregationDocs } = require('../updateResourceReferencesInAggregationDocs');
 const { pipeline } = require('./stageAggregationPipeline');
 const { queryForStageAggregationDoc } = require('./stageAggregationPipeline');
-const { updateResourceReferencesInAggregationDoc } = require('../updateResourceReferencesInAggregationDoc');
-const { competitionAggregationTargetType } = require('../competition/competitionAggregationPipeline');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -70,36 +68,38 @@ async function processStage(config, mongo, stageIdScope, stageId, requestId) {
 	//////////////////////////////////////////////////////////////////////////////
 	debug(`stageIdScope=${stageIdScope}, stageId=${stageId}`, requestId);
 	//////////////////////////////////////////////////////////////////////////////
+	// Check if competition exists before running expensive pipeline
+	const stageExists = await mongo.db.collection('stages').countDocuments({ _externalId: stageId, _externalIdScope: stageIdScope }, { limit: 1 });
+	//////////////////////////////////////////////////////////////////////////////
+	if (stageExists === 0) {
+		debug(`Stage not found: ${stageId}@${stageIdScope}`, requestId);
+		return 404;
+	}
+	//////////////////////////////////////////////////////////////////////////////
 	const pipelineObj = pipeline(config, stageIdScope, stageId);
 	const stageAggregationDocQuery = queryForStageAggregationDoc(stageId, stageIdScope);
 	//////////////////////////////////////////////////////////////////////////////
 	// Retrieve the previous version of the stage aggregation (if it exists) and calculate old competition keys
+	// A stage has outbound references to:
+	// - competition
 	const oldAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(stageAggregationDocQuery);
-	const oldCompScopeAndId = splitKey(oldAggregationDoc?.competitionKeys[0]);
+	const oldCompetitionExternalKey = oldAggregationDoc?.competitionKeys?.[0];
 	//////////////////////////////////////////////////////////////////////////////
 	// Build the stage aggregation view
 	await runPipeline(mongo, 'stages', pipelineObj, requestId);
 	//////////////////////////////////////////////////////////////////////////////
 	// Retrieve the new version of the stage aggregation and calculate new competition keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(stageAggregationDocQuery);
+	//////////////////////////////////////////////////////////////////////////////
+	// FIX UPWARDS REFERENCES
 	const stageObjectId = newAggregationDoc?.gamedayId;
 	const stageKey = `${stageId}${keySeparator}${stageIdScope}`;
-	const newCompScopeAndId = splitKey(newAggregationDoc?.competitionKeys[0]);
+	const stageResourceReference = { resourceType: 'stage', externalKey: stageKey, objectId: stageObjectId };
 	//////////////////////////////////////////////////////////////////////////////
-	// The stage may have moved competitions if either the competition id or scope has changed
-	// So we may need to update competition aggregations
-	await updateResourceReferencesInAggregationDoc(
-		mongo,
-		config,
-		'competition',
-		oldCompScopeAndId,
-		newCompScopeAndId,
-		competitionAggregationTargetType,
-		'stage',
-		stageObjectId,
-		stageKey,
-		requestId
-	);
+	// _externalCompetitionId
+	const newCompetitionExternalKey = newAggregationDoc?.competitionKeys?.[0];
+	const competitionAggregationDocs = { resourceType: 'competition', externalKey: { old: oldCompetitionExternalKey || null, new: newCompetitionExternalKey || null } };
+	await updateResourceReferencesInAggregationDocs(mongo, config, competitionAggregationDocs, stageResourceReference, requestId);
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
 }

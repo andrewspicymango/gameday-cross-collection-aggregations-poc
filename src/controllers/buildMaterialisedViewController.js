@@ -18,13 +18,13 @@ const { processTeam } = require('../pipelines/team/teamAggregationBuild.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Notes
-// curl -X POST localhost:8080/1-0/aggregate/competitions/bblapi/2023:BBL?create=true
-// curl -X POST localhost:8080/1-0/aggregate/events/bblapi/6ea116b7-7c38-47b3-a1ee-db90108034b2?create=true
-// curl -X POST localhost:8080/1-0/aggregate/events/bblapi/6ea116b7-7c38-47b3-a1ee-db90108034b2?create=false
-// curl -X POST localhost:8080/1-0/aggregate/competitions/fifa/289175?create=true
-// curl -X POST localhost:8080/1-0/aggregate/events/fifa/146186?create=false
-
+// curl -X POST localhost:8080/1-0/aggregate/competitions/bblapi/2023:BBL
+// curl -X POST localhost:8080/1-0/aggregate/stages/bblapi/2023:BBL:league
+// curl -X POST localhost:8080/1-0/aggregate/events/bblapi/6ea116b7-7c38-47b3-a1ee-db90108034b2
 // curl -X POST localhost:8080/1-0/aggregate/teams/bblapi/9a259543-a5a3-4f51-b352-9ceeffb4ae15
+//
+// curl -X POST localhost:8080/1-0/aggregate/competitions/fifa/289175
+// curl -X POST localhost:8080/1-0/aggregate/events/fifa/146186
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
