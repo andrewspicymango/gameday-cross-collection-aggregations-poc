@@ -1,76 +1,114 @@
 // pipelineBuilder.js
+
 /**
- * Build a pipeline that:
- *  - loads the root doc (resourceType + externalKey),
- *  - walks materialised relations to collect target ObjectIds,
- *  - returns a list of fully materialised target docs (limited),
- *  - plus an overflow doc with remaining ObjectIds.
+ * Build a MongoDB aggregation pipeline that:
+ *  - loads a root doc (resourceType + externalKey) from 'materialisedAggregations',
+ *  - for EACH requested targetType, walks the materialised edges to collect target ObjectIds,
+ *  - returns, per targetType:
+ *      items: fully materialised docs (limited),
+ *      overflow: { resourceType, overflowIds: [...] } for IDs beyond the limit.
+ *
+ * Output shape:
+ * [
+ *   {
+ *     root: { type, externalKey },
+ *     results: {
+ *       <targetType1>: { items: [...], overflow: { resourceType: <t1>, overflowIds: [...] } },
+ *       <targetType2>: { ... },
+ *       ...
+ *     }
+ *   }
+ * ]
  *
  * @param {Object} params
- * @param {string} params.rootType              e.g. "competition"
- * @param {string} params.rootExternalKey       e.g. "289175 @ fifa"
- * @param {string} params.targetType            e.g. "event" | "team" | "venue" | "club" | "sportsPerson" | "stage" | "sgo"
- * @param {number} params.maxCount              e.g. 100
- * @param {string} [params.collection="materialisedAggregations"]
+ * @param {string} params.rootType
+ * @param {string} params.rootExternalKey
+ * @param {string[]} params.targetTypes                  // one or more
+ * @param {number} params.maxCount                       // limit applied to every target type
+ * @param {Object} [params.perTypeMax]                   // optional overrides, e.g. { event: 200, team: 50 }
+ * @param {string} [params.collection='materialisedAggregations']
  * @returns {import('mongodb').Document[]} aggregation pipeline
  */
-function buildMaterialisedListPipeline({ rootType, rootExternalKey, targetType, maxCount, collection = 'materialisedAggregations' }) {
-	if (!rootType || !rootExternalKey || !targetType || !Number.isInteger(maxCount) || maxCount < 0) {
-		throw new Error('rootType, rootExternalKey, targetType, and non-negative integer maxCount are required');
-	}
+function buildMaterialisedListsPipeline({ rootType, rootExternalKey, targetTypes, maxCount, perTypeMax = {}, collection = 'materialisedAggregations' }) {
+	if (!rootType || !rootExternalKey) throw new Error('rootType and rootExternalKey are required');
+	if (!Array.isArray(targetTypes) || targetTypes.length === 0) throw new Error('targetTypes must be a non-empty array');
+	if (!Number.isInteger(maxCount) || maxCount < 0) throw new Error('maxCount must be a non-negative integer');
 
-	// Describe traversable edges using your materialised arrays (from doc → field → next type)
-	// Derived from your sample docs:
-	// - competition.stages -> stage
-	// - stage.events -> event
-	// - event.teams -> team, event.venues -> venue, event.sportsPersons -> sportsPerson
-	// - team.clubs -> club
+	// Directed, field-based edges, derived from your materialised docs.
+	// (You can extend any time without changing the rest of the code.)
+	// competition.sgos <-> sgo.competitions; competition.stages <-> stage.competitions
+	// stage.events <-> event.stages
+	// event.teams | event.venues | event.sportsPersons
+	// team.clubs | team.events | team.nations
+	// venue.events
+	// club.teams
 	const EDGES = {
-		competition: { stages: 'stage' },
-		stage: { events: 'event' },
-		event: { teams: 'team', venues: 'venue', sportsPersons: 'sportsPerson' },
-		team: { clubs: 'club' },
-		// add more here if/when you materialise additional relations
+		competition: { stages: 'stage', sgos: 'sgo' },
+		stage: { events: 'event', competitions: 'competition' },
+		event: { teams: 'team', venues: 'venue', sportsPersons: 'sportsPerson', stages: 'stage' },
+		team: { clubs: 'club', events: 'event', nations: 'nation' },
+		venue: { events: 'event' },
+		club: { teams: 'team' },
+		sgo: { competitions: 'competition' },
+		nation: { teams: 'team' }, // assume materialised; safe even if empty
 	};
 
-	// Find the hop path from rootType to targetType using BFS over EDGES
-	const path = findPath(EDGES, rootType, targetType);
-	if (!path) {
-		throw new Error(`No materialised path found from '${rootType}' to '${targetType}'. Extend EDGES if needed.`);
+	const stages = [{ $match: { resourceType: rootType, externalKey: rootExternalKey } }, { $addFields: { _rootKey: '$externalKey' } }];
+
+	// Build a facet branch for every requested targetType.
+	const facet = {};
+	for (const tgt of targetTypes) {
+		const path = findPath(EDGES, rootType, tgt);
+		if (!path) throw new Error(`No materialised path from '${rootType}' to '${tgt}'. Add an edge if this should exist.`);
+
+		const limit = Number.isInteger(perTypeMax[tgt]) ? perTypeMax[tgt] : maxCount;
+		facet[tgt] = buildBranchPipeline({ path, targetType: tgt, limit, collection });
 	}
-	// path = array of hops like: [{ from:'competition', field:'stages', to:'stage' }, { from:'stage', field:'events', to:'event' }, ...]
 
-	// Build the hop lookups. We keep aggregating ObjectIds set → next set.
-	// Each hop becomes a $lookup that:
-	//   - filters documents by _id ∈ $$ids AND resourceType == <from>
-	//   - projects the "next" field (array of ObjectIds)
-	//   - unwinds and groups inside the subpipeline to return a single doc { ids: [distinct OIDs] }
-	// Then we pull that array back up with $addFields.
-	const stages = [];
+	stages.push({ $facet: facet });
 
-	// 1) Load the root by { resourceType, externalKey }.
-	stages.push(
-		{ $match: { resourceType: rootType, externalKey: rootExternalKey } },
-		// For the very first "ids", if there are no hops (root == target), we will just read the root itself.
-		{ $addFields: { _rootKey: '$externalKey' } }
-	);
+	// Reshape: each facet key holds an array with a single {items, overflow} object
+	const resultsProjection = {};
+	for (const tgt of targetTypes) {
+		resultsProjection[tgt] = { $ifNull: [{ $arrayElemAt: [`$${tgt}`, 0] }, { items: [], overflow: { resourceType: tgt, overflowIds: [] } }] };
+	}
 
-	// If root == target, the "targetIds" are just [root._id]
+	stages.push({
+		$project: {
+			root: { type: { $literal: rootType }, externalKey: '$_rootKey' },
+			results: resultsProjection,
+		},
+	});
+
+	return stages;
+}
+
+/**
+ * Build the per-targetType facet branch.
+ * - Walks the hop path to produce targetIds
+ * - Splits into includedIds/overflowIds by `limit`
+ * - Looks up fully materialised docs for includedIds
+ * - Emits one object: { items: [...], overflow: { resourceType, overflowIds } }
+ */
+function buildBranchPipeline({ path, targetType, limit, collection }) {
+	const branch = [];
+
 	if (path.length === 0) {
-		stages.push({ $project: { targetIds: ['$_id'], _rootKey: 1 } });
+		// Root == Target
+		branch.push({ $project: { targetIds: ['$_id'] } });
 	} else {
-		// Seed ids from the first hop field on the root doc
-		const firstHop = path[0]; // e.g. competition.stages
-		stages.push({ $addFields: { ids0: { $ifNull: [`$${firstHop.field}`, []] } } });
+		// Seed from root (first hop’s field lives on the root doc)
+		const first = path[0];
+		branch.push({ $project: { ids0: { $ifNull: [`$${first.field}`, []] } } });
 
-		// For subsequent hops, chain lookups
-		path.forEach((hop, i) => {
-			if (i === 0) return; // already seeded from root
+		// For subsequent hops, chain lookups from the previous id set
+		for (let i = 1; i < path.length; i++) {
+			const hop = path[i]; // { from, field, to }
 			const prev = `ids${i - 1}`;
 			const cur = `ids${i}`;
 			const lkField = `hop${i}`;
 
-			stages.push({
+			branch.push({
 				$lookup: {
 					from: collection,
 					let: { ids: `$${prev}` },
@@ -89,80 +127,55 @@ function buildMaterialisedListPipeline({ rootType, rootExternalKey, targetType, 
 					as: lkField,
 				},
 			});
-			stages.push({
+			branch.push({
 				$addFields: {
-					[cur]: {
-						$ifNull: [{ $arrayElemAt: [`$${lkField}.ids`, 0] }, []],
-					},
+					[cur]: { $ifNull: [{ $arrayElemAt: [`$${lkField}.ids`, 0] }, []] },
 				},
 			});
-		});
-
-		// targetIds are from the last hop step:
-		const lastIdx = path.length - 1;
-		stages.push({ $addFields: { targetIds: `$ids${lastIdx}` } });
+		}
+		branch.push({ $project: { targetIds: { $ifNull: [`$ids${path.length - 1}`, []] } } });
 	}
 
-	// 3) Limit & overflow
-	stages.push({
+	// Include / overflow
+	branch.push({
 		$addFields: {
-			includedIds: { $slice: ['$targetIds', maxCount] },
-			overflowIds: { $setDifference: ['$targetIds', { $slice: ['$targetIds', maxCount] }] },
+			includedIds: { $slice: ['$targetIds', limit] },
+			overflowIds: { $setDifference: ['$targetIds', { $slice: ['$targetIds', limit] }] },
 		},
 	});
 
-	// 4) Fetch the materialised target documents + build the overflow doc
-	stages.push({
-		$facet: {
-			items: [
+	// Fetch fully materialised docs for this target type
+	branch.push({
+		$lookup: {
+			from: collection,
+			let: { ids: '$includedIds' },
+			pipeline: [
 				{
-					$lookup: {
-						from: collection,
-						let: { ids: '$includedIds' },
-						pipeline: [
-							{
-								$match: {
-									$expr: {
-										$and: [{ $in: ['$_id', '$$ids'] }, { $eq: ['$resourceType', targetType] }],
-									},
-								},
-							},
-							// Optional: stable order by _id ascending for determinism
-							{ $sort: { _id: 1 } },
-						],
-						as: 'docs',
+					$match: {
+						$expr: {
+							$and: [{ $in: ['$_id', '$$ids'] }, { $eq: ['$resourceType', targetType] }],
+						},
 					},
 				},
-				{ $replaceWith: '$docs' }, // emit the array itself
+				{ $sort: { _id: 1 } },
 			],
-			overflow: [
-				{
-					$project: {
-						_id: 0,
-						resourceType: { $literal: targetType },
-						overflowIds: '$overflowIds',
-					},
-				},
-			],
+			as: 'docs',
 		},
 	});
 
-	// 5) Flatten the facet into a single response document:
-	stages.push({
-		$project: {
-			resourceType: { $literal: targetType },
-			root: { type: { $literal: rootType }, externalKey: '$_rootKey' },
-			items: { $ifNull: [{ $arrayElemAt: ['$items', 0] }, []] },
-			overflow: { $ifNull: [{ $arrayElemAt: ['$overflow', 0] }, { resourceType: targetType, overflowIds: [] }] },
+	// Emit a single object for this facet branch
+	branch.push({
+		$replaceWith: {
+			items: '$docs',
+			overflow: { resourceType: targetType, overflowIds: '$overflowIds' },
 		},
 	});
 
-	return stages;
+	return branch;
 }
 
 /**
- * Find a shortest hop-path from 'startType' to 'endType' using EDGES.
- * Returns array of hops like: [{from, field, to}, ...]
+ * BFS over field-based edges; returns [{from, field, to}, ...]
  */
 function findPath(EDGES, startType, endType) {
 	if (startType === endType) return [];
@@ -186,4 +199,4 @@ function findPath(EDGES, startType, endType) {
 	return null;
 }
 
-module.exports = { buildMaterialisedListPipeline };
+module.exports = { buildMaterialisedListsPipeline };
