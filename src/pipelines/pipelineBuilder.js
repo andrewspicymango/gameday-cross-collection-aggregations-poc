@@ -1,112 +1,95 @@
 // pipelineBuilder.js
-////////////////////////////////////////////////////////////////////////////////
-// Example: From a COMPETITION → fetch EVENTS + TEAMS + SGOS
-const pipeline = buildMaterialisedListsPipeline({
-	rootType: 'competition',
-	rootExternalKey: '289175 @ fifa',
-	targetTypes: ['event'], // 'team', 'sgo'],
-	maxCount: 100, // per-type default limit
-	perTypeMax: { team: 50 }, // optional overrides
-});
+
 ////////////////////////////////////////////////////////////////////////////////
 const idField = 'gamedayId';
 const collection = 'materialisedAggregations';
+////////////////////////////////////////////////////////////////////////////////
+// Example: From a COMPETITION → fetch EVENTS + TEAMS + SGOS
+const pipeline = buildMaterialisedListsPipelineTotalMax({
+	rootType: 'competition',
+	rootExternalKey: '289175 @ fifa',
+	targetTypes: ['event', 'team'], // 'team', 'sgo'],
+	totalMax: 4,
+});
 
 ////////////////////////////////////////////////////////////////////////////////
-// optimisedMaterialiser.js
-// Build a single aggregation pipeline that:
-//  - Loads a root doc by { resourceType, externalKey }
-//  - Computes all shared traversal hops only once (across multiple targets)
-//  - For each requested target type, limits, overflows, and materialises docs
-//
-// Exports:
-//   buildMaterialisedListsPipelineOptimised(params) -> aggregation pipeline array
-//
-// Usage example is at the end of this file.
+
+////////////////////////////////////////////////////////////////////////////////
+// materialiser.totalMax.js
+// Build one aggregation pipeline that:
+//  - Finds shortest paths from root → each target
+//  - Merges shared hops (compute once, reuse across targets)
+//  - Applies a single totalMax budget across (root + targets in the order given)
+//  - Returns per-type materialised items and overflowIds
+////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Build an optimised, shared-hop MongoDB aggregation pipeline.
+ * Build a total-budget (totalMax) multi-target pipeline with shared-hop traversal.
  *
  * @param {Object} params
  * @param {string} params.rootType                       // e.g. "competition"
  * @param {string} params.rootExternalKey                // e.g. "289175 @ fifa"
- * @param {string[]} params.targetTypes                  // e.g. ["event","team","sgo"]
- * @param {number} params.maxCount                       // default per-target limit
- * @param {Object} [params.perTypeMax={}]                // e.g. { team: 50 }
+ * @param {string[]} params.targetTypes                  // order determines budget allocation after root
+ * @param {number} params.totalMax                       // total number of docs to materialise (including root)
  * @param {Object} [params.edges]                        // optional override of default EDGES
- * @param {('id'|'lastUpdated'|null)} [params.sortBy='id'] // materialised item sort: 'id' | 'lastUpdated' | null
- * @param {1|-1} [params.sortDir=1]                      // 1 asc, -1 desc
+ * @param {('id'|'lastUpdated'|null)} [params.sortBy='id'] // sort materialised items within each type
+ * @param {1|-1} [params.sortDir=1]
  * @returns {import('mongodb').Document[]}
  */
-function buildMaterialisedListsPipelineOptimised({ rootType, rootExternalKey, targetTypes, maxCount, perTypeMax = {}, edges, sortBy = 'id', sortDir = 1 }) {
-	//////////////////////////////////////////////////////////////////////////////
-	// ---- validation
+function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, targetTypes, totalMax, edges, sortBy = 'id', sortDir = 1 }) {
 	if (!rootType || !rootExternalKey) throw new Error('rootType and rootExternalKey are required');
 	if (!Array.isArray(targetTypes) || targetTypes.length === 0) throw new Error('targetTypes must be a non-empty array');
-	if (!Number.isInteger(maxCount) || maxCount < 0) throw new Error('maxCount must be a non-negative integer');
+	if (!Number.isInteger(totalMax) || totalMax < 0) throw new Error('totalMax must be a non-negative integer');
 
 	//////////////////////////////////////////////////////////////////////////////
-	// ---- default EDGES (directed, field -> neighbor type)
-	// Add/adjust here as your materialised docs evolve.
+	// Directed, field-labeled graph of materialised edges (extend as needed)
 	const EDGES = edges || {
-		// competition
 		competition: { stages: 'stage', sgos: 'sgo' },
-
-		// stage
 		stage: { events: 'event', competitions: 'competition' },
-
-		// event
 		event: { teams: 'team', venues: 'venue', sportsPersons: 'sportsPerson', stages: 'stage' },
-
-		// team
 		team: { clubs: 'club', events: 'event', nations: 'nation' },
-
-		// venue
 		venue: { events: 'event' },
-
-		// club
 		club: { teams: 'team' },
-
-		// sgo
 		sgo: { competitions: 'competition' },
-
-		// nation
 		nation: { teams: 'team' },
 	};
 
 	//////////////////////////////////////////////////////////////////////////////
-	// ---- 1) Compute a shortest hop path per target
+	// 1) Compute shortest paths (by hop count) from root → each target
 	const pathsByTarget = {};
 	for (const t of targetTypes) {
-		const path = findPath(EDGES, rootType, t);
-		if (path === null) {
-			throw new Error(`No materialised path from '${rootType}' to '${t}'. Add an edge if this should exist.`);
-		}
-		pathsByTarget[t] = path; // [] means root == target
+		// p is an array of the joins between path elements, e.g.
+		// [ { from: "competition", field: "stages", to: "stage"}, { from: "stage", field: "events", to: "event"} ]
+		const p = findPath(EDGES, rootType, t);
+		if (p === null) throw new Error(`No materialised path from '${rootType}' to '${t}'. Add an edge if it should exist.`);
+		pathsByTarget[t] = p; // [] means root == target
 	}
+
 	//////////////////////////////////////////////////////////////////////////////
-	// ---- 2) Merge paths into unique steps (prefix-merged traversal)
+	// 2) Merge paths into unique traversal steps (shared hops computed once)
 	const steps = planSteps(Object.values(pathsByTarget));
 
 	//////////////////////////////////////////////////////////////////////////////
-	// ---- 3) Build pipeline
-	const stages = [{ $match: { resourceType: rootType, externalKey: rootExternalKey } }, { $addFields: { _rootKey: '$externalKey' } }];
+	// 3) Build pipeline
+	const stages = [
+		{ $match: { resourceType: rootType, externalKey: rootExternalKey } },
+		{ $addFields: { _rootKey: '$externalKey' } },
+		// Always expose the root's own id as an array for uniform handling
+		{ $addFields: { _rootIds: [`$${idField}`] } },
+	];
 
+	//////////////////////////////////////////////////////////////////////////////
 	// Compute each unique step once and store its output in a named field.
-	// Step output naming is deterministic and reused.
 	for (const step of steps) {
-		const { key, from, field, to, dependsOnKey, depth, outputName } = step;
+		const { from, field, dependsOnKey, outputName, depth } = step;
 
 		if (depth === 0) {
-			// First hop from ROOT: read array directly off the root doc
-			stages.push({
-				$addFields: { [outputName]: { $ifNull: [`$${field}`, []] } },
-			});
+			// Seed from ROOT: read the first-hop array right off the root doc
+			stages.push({ $addFields: { [outputName]: { $ifNull: [`$${field}`, []] } } });
 		} else {
-			// Dependent hop: use the previous step's output as $$ids
 			const prev = steps.find((s) => s.key === dependsOnKey);
-			if (!prev) throw new Error(`Internal: missing dependency for step ${key}`);
+			if (!prev) throw new Error(`Internal: missing dependency for step ${step.key}`);
 			const prevOutput = prev.outputName;
 			const lkField = `${outputName}__lk`;
 
@@ -124,62 +107,165 @@ function buildMaterialisedListsPipelineOptimised({ rootType, rootExternalKey, ta
 					as: lkField,
 				},
 			});
-			stages.push({
-				$addFields: { [outputName]: { $ifNull: [{ $arrayElemAt: [`$${lkField}.ids`, 0] }, []] } },
-			});
+			stages.push({ $addFields: { [outputName]: { $ifNull: [{ $arrayElemAt: [`$${lkField}.ids`, 0] }, []] } } });
 		}
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
-	// ---- 4) Per-target: take its final ID set, limit/overflow, and materialise docs
-	const facet = {};
+	// 4) Budget allocation (root first, then targetTypes order)
+	// We'll compute included/overflow per type step-by-step, consuming 'remaining'.
+	stages.push({ $addFields: { _remaining: totalMax } });
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Root allocation
+	// include 1 root if remaining > 0; else overflow contains the rootId
+	stages.push({
+		$addFields: {
+			_rootIncludedIds: {
+				$cond: [{ $gt: ['$_remaining', 0] }, { $slice: ['$_rootIds', 1] }, []],
+			},
+			_rootOverflowIds: {
+				$cond: [
+					{ $gt: ['$_remaining', 0] },
+					{ $slice: ['$_rootIds', 0] }, // empty
+					'$_rootIds', // all rootIds overflow if budget 0
+				],
+			},
+			_remaining: {
+				$cond: [{ $gt: ['$_remaining', 0] }, { $subtract: ['$_remaining', 1] }, '$_remaining'],
+			},
+		},
+	});
+
+	//////////////////////////////////////////////////////////////////////////////
+	// For each target type, pick its final ID array source,
+	// then allocate from _remaining in the order provided.
+	const finalArrayFieldByType = {};
 	for (const t of targetTypes) {
 		const path = pathsByTarget[t];
-		const limit = Number.isInteger(perTypeMax[t]) ? perTypeMax[t] : maxCount;
+		let sourceFieldExpr;
 
-		let sourceArrayExpr;
 		if (path.length === 0) {
-			// Root == target → single id -> wrap as array
-			// (in aggregation, ["$field"] is valid and resolves to the field value)
-			sourceArrayExpr = [`$${idField}`];
+			// root == target → use rootIds
+			sourceFieldExpr = '$_rootIds';
 		} else {
 			const lastHop = path[path.length - 1];
 			const lastKey = makeKey(lastHop.from, lastHop.field, lastHop.to);
 			const lastStep = steps.find((s) => s.key === lastKey);
-			if (!lastStep) throw new Error(`Internal: cannot find step for target '${t}'`);
-			sourceArrayExpr = `$${lastStep.outputName}`;
+			if (!lastStep) throw new Error(`Internal: cannot find step for '${t}'`);
+			sourceFieldExpr = `$${lastStep.outputName}`;
 		}
 
-		const sortStage = sortBy === 'lastUpdated' ? [{ $sort: { lastUpdated: sortDir } }] : sortBy === 'id' ? [{ $sort: { [idField]: sortDir } }] : []; // no sorting
+		// Store source for later materialisation
+		const idsVar = `_src_${t}_ids`;
+		finalArrayFieldByType[t] = idsVar;
 
-		facet[t] = [
-			{ $project: { _ids: sourceArrayExpr } },
-			{
-				$addFields: {
-					includedIds: { $slice: ['$_ids', limit] },
-					overflowIds: { $setDifference: ['$_ids', { $slice: ['$_ids', limit] }] },
+		// Attach the source ids for this type
+		stages.push({ $addFields: { [idsVar]: sourceFieldExpr } });
+
+		// Allocate budget for this type (included / overflow)
+		const includedVar = `_inc_${t}_ids`;
+		const overflowVar = `_ovf_${t}_ids`;
+
+		stages.push({
+			$addFields: {
+				[includedVar]: {
+					$let: {
+						vars: { sz: { $size: `$${idsVar}` } },
+						in: {
+							$cond: [
+								{ $gt: ['$_remaining', 0] },
+								{
+									$slice: [`$${idsVar}`, { $min: ['$_remaining', '$$sz'] }],
+								},
+								[],
+							],
+						},
+					},
+				},
+				[overflowVar]: {
+					$cond: [
+						{ $gt: ['$_remaining', 0] },
+						{
+							$let: {
+								vars: {
+									take: { $min: ['$_remaining', { $size: `$${idsVar}` }] },
+								},
+								in: {
+									$slice: [`$${idsVar}`, '$$take', { $subtract: [{ $size: `$${idsVar}` }, '$$take'] }],
+								},
+							},
+						},
+						`$${idsVar}`, // if remaining == 0, all overflow
+					],
+				},
+				_remaining: {
+					$let: {
+						vars: {
+							take: { $min: ['$_remaining', { $size: `$${idsVar}` }] },
+						},
+						in: { $subtract: ['$_remaining', '$$take'] },
+					},
 				},
 			},
+		});
+	}
+
+	//////////////////////////////////////////////////////////////////////////////
+	// 5) Materialise per type (root + each target) using a single $facet
+	// Sorting within each type is optional (id or lastUpdated or none)
+	const sortStageFor = (type) => {
+		if (sortBy === 'lastUpdated') return [{ $sort: { lastUpdated: sortDir } }];
+		if (sortBy === 'id') return [{ $sort: { [idField]: sortDir } }];
+		return [];
+	};
+
+	const facet = {};
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Root type facet
+	facet[rootType] = [
+		{ $project: { includedIds: '$_rootIncludedIds', overflowIds: '_rootOverflowIds' } },
+		{
+			$lookup: {
+				from: collection,
+				let: { ids: '$includedIds' },
+				pipeline: [{ $match: { resourceType: rootType } }, { $match: { $expr: { $in: [`$${idField}`, '$$ids'] } } }, ...sortStageFor(rootType)],
+				as: 'docs',
+			},
+		},
+		{ $replaceWith: { items: '$docs', overflow: { resourceType: rootType, overflowIds: '$overflowIds' } } },
+	];
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Target types facets
+	for (const t of targetTypes) {
+		const includedVar = `_inc_${t}_ids`;
+		const overflowVar = `_ovf_${t}_ids`;
+
+		facet[t] = [
+			{ $project: { includedIds: `$${includedVar}`, overflowIds: `$${overflowVar}` } },
 			{
 				$lookup: {
 					from: collection,
 					let: { ids: '$includedIds' },
-					pipeline: [{ $match: { resourceType: t } }, { $match: { $expr: { $in: [`$${idField}`, '$$ids'] } } }, ...sortStage],
+					pipeline: [{ $match: { resourceType: t } }, { $match: { $expr: { $in: [`$${idField}`, '$$ids'] } } }, ...sortStageFor(t)],
 					as: 'docs',
 				},
 			},
-			{ $replaceWith: { items: '$docs', overflow: { resourceType: t, overflowIds: '$overflowIds' } } },
+			{ $replaceWith: { items: '$docs', overflow: { overflowIds: '$overflowIds' } } },
 		];
 	}
 
 	stages.push({ $facet: facet });
 
 	//////////////////////////////////////////////////////////////////////////////
-	// ---- 5) Final response shape
+	// 6) Final shape: always include keys for rootType + every target type
 	const resultsProjection = {};
-	for (const t of targetTypes) {
+	const allTypes = [rootType, ...targetTypes];
+	for (const t of allTypes) {
 		resultsProjection[t] = {
-			$ifNull: [{ $arrayElemAt: [`$${t}`, 0] }, { items: [], overflow: { resourceType: t, overflowIds: [] } }],
+			$ifNull: [{ $arrayElemAt: [`$${t}`, 0] }, { items: [], overflow: { overflowIds: [] } }],
 		};
 	}
 
@@ -194,27 +280,17 @@ function buildMaterialisedListsPipelineOptimised({ rootType, rootExternalKey, ta
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/**
- * Produce a shortest hop path (by number of edges) from startType to endType
- * over a directed, field-labeled graph.
- *
- * @param {Record<string, Record<string, string>>} EDGES
- * @param {string} startType
- * @param {string} endType
- * @returns {Array<{from:string, field:string, to:string}>|[]|null}
- */
+/** ===== helper graph functions (same as the optimised version) ===== */
+
+////////////////////////////////////////////////////////////////////////////////
 function findPath(EDGES, startType, endType) {
 	if (startType === endType) return [];
-
-	// BFS over types (nodes). Edges carry the "field" label.
 	const queue = [[startType, []]];
 	const visited = new Set([startType]);
 
 	while (queue.length) {
 		const [cur, path] = queue.shift();
 		const outs = EDGES[cur] || {};
-		// Optionally stabilise order:
-		// const ordered = Object.entries(outs).sort(([a],[b]) => a.localeCompare(b));
 		for (const [field, to] of Object.entries(outs)) {
 			const hop = { from: cur, field, to };
 			const nextPath = [...path, hop];
@@ -229,20 +305,8 @@ function findPath(EDGES, startType, endType) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/**
- * Given multiple hop paths, return a deduped, dependency-ordered list of steps.
- * Each step:
- *  - key:        "from.field->to" (unique ID)
- *  - from, field, to: hop metadata
- *  - depth:      index within its path (0 for first hop from the root)
- *  - dependsOnKey: key of the previous hop in that path (null for depth 0)
- *  - outputName: stable field name to store this step's resulting ID array
- *
- * @param {Array<Array<{from:string, field:string, to:string}>>} paths
- * @returns {Array<{key:string, from:string, field:string, to:string, depth:number, dependsOnKey:string|null, outputName:string}>}
- */
 function planSteps(paths) {
-	const seen = new Map(); // key -> step
+	const seen = new Map();
 	const steps = [];
 
 	for (const path of paths) {
@@ -253,39 +317,23 @@ function planSteps(paths) {
 
 			if (!seen.has(key)) {
 				const outputName = `${hop.to}Ids__${hashKey(key)}__d${i}`;
-				const step = {
-					key,
-					from: hop.from,
-					field: hop.field,
-					to: hop.to,
-					depth: i,
-					dependsOnKey,
-					outputName,
-				};
+				const step = { key, from: hop.from, field: hop.field, to: hop.to, depth: i, dependsOnKey, outputName };
 				seen.set(key, step);
 				steps.push(step);
 			}
-			// If we've seen it, we keep the first-seen definition;
-			// later occurrences will depend on the same key and reuse the same output field.
 		}
 	}
-
-	// Ensure parent steps appear before dependents (simple topological pass).
-	// Because each step depends on the immediate previous hop, sorting by depth then key is sufficient.
 	steps.sort((a, b) => a.depth - b.depth || a.key.localeCompare(b.key));
 	return steps;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/** Build a unique key for a hop. */
 function makeKey(from, field, to) {
 	return `${from}.${field}->${to}`;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/** Simple deterministic hash for readable, unique-ish output field names. */
 function hashKey(s) {
-	// DJB2-ish
 	let h = 5381;
 	for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
 	return (h >>> 0).toString(36);
@@ -293,46 +341,46 @@ function hashKey(s) {
 
 ////////////////////////////////////////////////////////////////////////////////
 module.exports = {
-	buildMaterialisedListsPipelineOptimised,
-	findPath, // exported for testing
-	planSteps, // exported for testing
-	makeKey, // exported for testing
-	hashKey, // exported for testing
+	buildMaterialisedListsPipelineTotalMax,
+	findPath,
+	planSteps,
+	makeKey,
+	hashKey,
 };
 
-/* =======================
-   Example usage:
+/* =========================
+Example usage:
 
 const { MongoClient } = require('mongodb');
-const { buildMaterialisedListsPipelineOptimised } = require('./optimisedMaterialiser');
+const { buildMaterialisedListsPipelineTotalMax } = require('./materialiser.totalMax');
 
 (async () => {
   const mongo = await MongoClient.connect(process.env.MONGO_URI);
   const coll = mongo.db().collection('materialisedAggregations');
 
-  const pipeline = buildMaterialisedListsPipelineOptimised({
+  // Example: totalMax = 4
+  // Allocation order = root (competition) → stages → events → teams
+  const pipeline = buildMaterialisedListsPipelineTotalMax({
     rootType: 'competition',
     rootExternalKey: '289175 @ fifa',
-    targetTypes: ['event', 'team', 'sgo'],
-    maxCount: 100,
-    perTypeMax: { team: 50 },
+    targetTypes: ['stage', 'event', 'team'],  // order controls who gets the remaining budget first
+    totalMax: 4,
     idField: 'gamedayId',
-    // sortBy: 'lastUpdated', sortDir: -1, // optional
+    // sortBy: 'lastUpdated', sortDir: -1,
   });
 
   const [result] = await coll.aggregate(pipeline, { allowDiskUse: true }).toArray();
-
   console.log(JSON.stringify(result, null, 2));
   await mongo.close();
 })();
 
-   ======================= */
+========================= */
 
 /*
-Indexing checklist (run once):
+Indexing (once):
 
-db.materialisedAggregations.createIndex({ resourceType: 1, externalKey: 1 });  // root match
-db.materialisedAggregations.createIndex({ resourceType: 1, gamedayId: 1 });   // joins & materialise lookups
-// Optional if sorting by lastUpdated frequently:
+db.materialisedAggregations.createIndex({ resourceType: 1, externalKey: 1 });  // root lookup
+db.materialisedAggregations.createIndex({ resourceType: 1, gamedayId: 1 });   // joins/materialise
+// If sorting by lastUpdated:
 db.materialisedAggregations.createIndex({ resourceType: 1, lastUpdated: -1, gamedayId: 1 });
 */
