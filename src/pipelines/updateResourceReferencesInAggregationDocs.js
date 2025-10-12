@@ -58,7 +58,7 @@ async function updateResourceReferencesInAggregationDocs(mongo, config, aggregat
 	// Prepare update operations
 	const operations = [];
 	const needsUpdate = aggregationDoc.externalKey.old !== aggregationDoc.externalKey.new;
-	//if (!needsUpdate) return;
+	if (!needsUpdate) return;
 	let referenceToManage = {};
 	if (resourceReference.resourceType === 'competition') referenceToManage = { competitions: resourceReference.objectId, competitionKeys: resourceReference.externalKey };
 	else if (resourceReference.resourceType === 'stage') referenceToManage = { stages: resourceReference.objectId, stageKeys: resourceReference.externalKey };
