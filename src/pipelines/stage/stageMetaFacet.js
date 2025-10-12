@@ -31,6 +31,7 @@ const stageMetaFacet = [
 			stageId: '$_externalId',
 			stageIdScope: '$_externalIdScope',
 			resourceType: '$resourceType',
+			name: { $getField: { field: '$defaultLanguage', input: '$name' } },
 		},
 	},
 ];

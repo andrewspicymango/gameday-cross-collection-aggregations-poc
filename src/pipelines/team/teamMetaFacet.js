@@ -13,6 +13,7 @@ const teamMetaFacet = [
 			teamId: '$_externalId',
 			teamIdScope: '$_externalIdScope',
 			resourceType: '$resourceType',
+			name: { $getField: { field: '$defaultLanguage', input: '$name' } },
 		},
 	},
 ];

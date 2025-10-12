@@ -5,6 +5,29 @@ const { keySeparator } = require('../constants');
 const { keyInAggregation } = require('../constants');
 
 ////////////////////////////////////////////////////////////////////////////////
+/**
+ * Builds a MongoDB aggregation pipeline that materialises a "stage" aggregation document.
+ *
+ * The pipeline:
+ *  - $match: filters documents by provided external stage id and scope
+ *  - $facet: runs composed sub-facets (stageMetaFacet, stageCompetitionFacet, stageEventsFacet)
+ *  - $project: extracts first values from the meta facet and normalises facet outputs to arrays with defaults
+ *  - $addFields: sets stable fields and stamps lastUpdated with the pipeline execution time ($$NOW)
+ *  - $merge: writes the resulting aggregation into a materialised collection (replace on match, insert otherwise)
+ *
+ * @param {Object} config - Runtime configuration; expects config.mongo.matAggCollectionName (optional)
+ * @param {string} STAGE_SCOPE - External scope identifier used to match the stage (e.g. league or provider scope)
+ * @param {string} STAGE_ID - External id of the stage to materialise
+ * @returns {Array<Object>} MongoDB aggregation pipeline array suitable for collection.aggregate(...)
+ *
+ * @sideEffect Writes/merges a materialised aggregation document into
+ *   config.mongo.matAggCollectionName or the default 'materialisedAggregations'.
+ *
+ * @remarks
+ *  - Expects the following variables to be available in the module scope:
+ *    stageMetaFacet, stageCompetitionFacet, stageEventsFacet, keySeparator, keyInAggregation.
+ *  - Uses {$first: ...} and {$ifNull: [..., []]} to produce stable, deterministic fields.
+ */
 const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 	//////////////////////////////////////////////////////////////////////////////
 	//$match: filters by _externalId and _externalIdScope (COMP_ID, COMP_SCOPE)
@@ -29,6 +52,7 @@ const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 			gamedayId: { $first: '$meta._id' },
 			_externalId: { $first: '$meta.stageId' },
 			_externalIdScope: { $first: '$meta.stageIdScope' },
+			name: { $first: '$meta.name' },
 			competitions: {
 				$ifNull: [{ $first: '$competitions.ids' }, []],
 			},
@@ -45,8 +69,6 @@ const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 	},
 
 	//////////////////////////////////////////////////////////////////////////////
-	// $addFields: sets output metadata (resourceType, _externalId, _externalIdScope, targetType)
-	// and stamps lastUpdated with $$NOW (pipeline execution time)
 	{
 		$addFields: {
 			resourceType: '$resourceType',
@@ -54,6 +76,7 @@ const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 			gamedayId: '$gamedayId',
 			_externalId: '$_externalId',
 			_externalIdScope: '$_externalIdScope',
+			name: '$name',
 			lastUpdated: '$$NOW', // current pipeline execution time
 		},
 	},
