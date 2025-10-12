@@ -1,8 +1,22 @@
-// pipelineBuilder.js
-
 ////////////////////////////////////////////////////////////////////////////////
 const idField = 'gamedayId';
-const collection = 'materialisedAggregations';
+const aggregationCollectionName = 'materialisedAggregations';
+
+////////////////////////////////////////////////////////////////////////////////
+// {
+//  // Exclude specific fields by setting them to 0
+//  fieldToExclude1: 0,
+//  fieldToExclude2: 0,
+//  // Or include only specific fields by setting them to 1
+//  // _id: 1,
+//  // fieldToInclude1: 1,
+//  // fieldToInclude2: 1
+// },
+const fieldsToExcludeFromMaterialisedResources = {
+	_stickies: 0,
+	_original: 0,
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 // Example: From a COMPETITION → fetch EVENTS + TEAMS + SGOS
 const pipeline = buildMaterialisedListsPipelineTotalMax({
@@ -13,37 +27,33 @@ const pipeline = buildMaterialisedListsPipelineTotalMax({
 });
 
 ////////////////////////////////////////////////////////////////////////////////
-
-////////////////////////////////////////////////////////////////////////////////
-// materialiser.totalMax.js
-// Build one aggregation pipeline that:
-//  - Finds shortest paths from root → each target
-//  - Merges shared hops (compute once, reuse across targets)
-//  - Applies a single totalMax budget across (root + targets in the order given)
-//  - Returns per-type materialised items and overflowIds
-////////////////////////////////////////////////////////////////////////////////
+// materialiser.totalMax.resources.js
+// Optimised totalMax multi-target materialiser:
+// - Traverse *materialisedAggregations* once to compute ID sets (shared hops)
+// - Materialise documents from the correct resource collections (e.g., 'stages', 'events', 'teams')
+// - Apply a single totalMax budget across root + target types in the caller-specified order
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
  * Build a total-budget (totalMax) multi-target pipeline with shared-hop traversal.
  *
  * @param {Object} params
- * @param {string} params.rootType                       // e.g. "competition"
- * @param {string} params.rootExternalKey                // e.g. "289175 @ fifa"
- * @param {string[]} params.targetTypes                  // order determines budget allocation after root
- * @param {number} params.totalMax                       // total number of docs to materialise (including root)
- * @param {Object} [params.edges]                        // optional override of default EDGES
- * @param {('id'|'lastUpdated'|null)} [params.sortBy='id'] // sort materialised items within each type
+ * @param {string} params.rootType
+ * @param {string} params.rootExternalKey
+ * @param {string[]} params.targetTypes             // order controls budget allocation (after root)
+ * @param {number} params.totalMax                  // total number of docs to materialise (including root)
+ * @param {Object} [params.edges]                   // override the default graph edges if needed
+ * @param {Object} [params.collectionMap]          // map resourceType -> collection name for *materialisation*
+ * @param {('id'|'lastUpdated'|null)} [params.sortBy='id'] // per-type sort inside materialised arrays
  * @param {1|-1} [params.sortDir=1]
  * @returns {import('mongodb').Document[]}
  */
-function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, targetTypes, totalMax, edges, sortBy = 'id', sortDir = 1 }) {
+function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, targetTypes, totalMax, edges, collectionMap, sortBy = 'id', sortDir = 1 }) {
 	if (!rootType || !rootExternalKey) throw new Error('rootType and rootExternalKey are required');
 	if (!Array.isArray(targetTypes) || targetTypes.length === 0) throw new Error('targetTypes must be a non-empty array');
 	if (!Number.isInteger(totalMax) || totalMax < 0) throw new Error('totalMax must be a non-negative integer');
-
-	//////////////////////////////////////////////////////////////////////////////
-	// Directed, field-labeled graph of materialised edges (extend as needed)
+	////////////////////////////////////////////////////////////////////////////////
+	// Directed, field-labeled graph of materialised edges (extend as your views evolve)
 	const EDGES = edges || {
 		competition: { stages: 'stage', sgos: 'sgo' },
 		stage: { events: 'event', competitions: 'competition' },
@@ -54,16 +64,34 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 		sgo: { competitions: 'competition' },
 		nation: { teams: 'team' },
 	};
-
+	////////////////////////////////////////////////////////////////////////////////
+	// resourceType -> resource collection name (for final materialisation lookups)
+	const COLLECTIONS = collectionMap || {
+		competition: 'competitions',
+		stage: 'stages',
+		event: 'events',
+		team: 'teams',
+		venue: 'venues',
+		club: 'clubs',
+		sgo: 'sgos',
+		nation: 'nations',
+		sportsPerson: 'sportsPersons',
+	};
 	//////////////////////////////////////////////////////////////////////////////
-	// 1) Compute shortest paths (by hop count) from root → each target
+	// Validate that we can materialise all requested types (root + targets)
+	const allTypes = new Set([rootType, ...targetTypes]);
+	for (const t of allTypes) {
+		if (!COLLECTIONS[t]) {
+			throw new Error(`No collection mapping for resourceType='${t}'. Provide 'collectionMap' or extend defaults.`);
+		}
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	// 1) Compute shortest hop paths from root → each target
 	const pathsByTarget = {};
 	for (const t of targetTypes) {
-		// p is an array of the joins between path elements, e.g.
-		// [ { from: "competition", field: "stages", to: "stage"}, { from: "stage", field: "events", to: "event"} ]
 		const p = findPath(EDGES, rootType, t);
 		if (p === null) throw new Error(`No materialised path from '${rootType}' to '${t}'. Add an edge if it should exist.`);
-		pathsByTarget[t] = p; // [] means root == target
+		pathsByTarget[t] = p; // [] => root == target
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
@@ -71,21 +99,19 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 	const steps = planSteps(Object.values(pathsByTarget));
 
 	//////////////////////////////////////////////////////////////////////////////
-	// 3) Build pipeline
+	// 3) Build pipeline (traverse in *materialisedAggregations*)
 	const stages = [
 		{ $match: { resourceType: rootType, externalKey: rootExternalKey } },
 		{ $addFields: { _rootKey: '$externalKey' } },
-		// Always expose the root's own id as an array for uniform handling
+		// expose the root's own id as an array for uniform budget handling later
 		{ $addFields: { _rootIds: [`$${idField}`] } },
 	];
 
-	//////////////////////////////////////////////////////////////////////////////
-	// Compute each unique step once and store its output in a named field.
 	for (const step of steps) {
 		const { from, field, dependsOnKey, outputName, depth } = step;
 
 		if (depth === 0) {
-			// Seed from ROOT: read the first-hop array right off the root doc
+			// First hop: read array directly from the root doc
 			stages.push({ $addFields: { [outputName]: { $ifNull: [`$${field}`, []] } } });
 		} else {
 			const prev = steps.find((s) => s.key === dependsOnKey);
@@ -95,7 +121,7 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 
 			stages.push({
 				$lookup: {
-					from: collection,
+					from: aggregationCollectionName,
 					let: { ids: `$${prevOutput}` },
 					pipeline: [
 						{ $match: { resourceType: from } },
@@ -112,24 +138,18 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
-	// 4) Budget allocation (root first, then targetTypes order)
-	// We'll compute included/overflow per type step-by-step, consuming 'remaining'.
+	// 4) Budget allocation (root first, then in the order of targetTypes)
 	stages.push({ $addFields: { _remaining: totalMax } });
 
 	//////////////////////////////////////////////////////////////////////////////
-	// Root allocation
-	// include 1 root if remaining > 0; else overflow contains the rootId
+	// Root allocation (counts as 1 if budget > 0)
 	stages.push({
 		$addFields: {
 			_rootIncludedIds: {
 				$cond: [{ $gt: ['$_remaining', 0] }, { $slice: ['$_rootIds', 1] }, []],
 			},
 			_rootOverflowIds: {
-				$cond: [
-					{ $gt: ['$_remaining', 0] },
-					{ $slice: ['$_rootIds', 0] }, // empty
-					'$_rootIds', // all rootIds overflow if budget 0
-				],
+				$cond: [{ $gt: ['$_remaining', 0] }, { $slice: ['$_rootIds', 0] }, '$_rootIds'],
 			},
 			_remaining: {
 				$cond: [{ $gt: ['$_remaining', 0] }, { $subtract: ['$_remaining', 1] }, '$_remaining'],
@@ -138,15 +158,12 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 	});
 
 	//////////////////////////////////////////////////////////////////////////////
-	// For each target type, pick its final ID array source,
-	// then allocate from _remaining in the order provided.
+	// For each target, attach its final ID set and consume budget
 	const finalArrayFieldByType = {};
 	for (const t of targetTypes) {
 		const path = pathsByTarget[t];
 		let sourceFieldExpr;
-
 		if (path.length === 0) {
-			// root == target → use rootIds
 			sourceFieldExpr = '$_rootIds';
 		} else {
 			const lastHop = path[path.length - 1];
@@ -156,14 +173,11 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 			sourceFieldExpr = `$${lastStep.outputName}`;
 		}
 
-		// Store source for later materialisation
 		const idsVar = `_src_${t}_ids`;
 		finalArrayFieldByType[t] = idsVar;
 
-		// Attach the source ids for this type
 		stages.push({ $addFields: { [idsVar]: sourceFieldExpr } });
 
-		// Allocate budget for this type (included / overflow)
 		const includedVar = `_inc_${t}_ids`;
 		const overflowVar = `_ovf_${t}_ids`;
 
@@ -173,13 +187,7 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 					$let: {
 						vars: { sz: { $size: `$${idsVar}` } },
 						in: {
-							$cond: [
-								{ $gt: ['$_remaining', 0] },
-								{
-									$slice: [`$${idsVar}`, { $min: ['$_remaining', '$$sz'] }],
-								},
-								[],
-							],
+							$cond: [{ $gt: ['$_remaining', 0] }, { $slice: [`$${idsVar}`, { $min: ['$_remaining', '$$sz'] }] }, []],
 						},
 					},
 				},
@@ -188,22 +196,16 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 						{ $gt: ['$_remaining', 0] },
 						{
 							$let: {
-								vars: {
-									take: { $min: ['$_remaining', { $size: `$${idsVar}` }] },
-								},
-								in: {
-									$slice: [`$${idsVar}`, '$$take', { $subtract: [{ $size: `$${idsVar}` }, '$$take'] }],
-								},
+								vars: { take: { $min: ['$_remaining', { $size: `$${idsVar}` }] } },
+								in: { $slice: [`$${idsVar}`, '$$take', { $subtract: [{ $size: `$${idsVar}` }, '$$take'] }] },
 							},
 						},
-						`$${idsVar}`, // if remaining == 0, all overflow
+						`$${idsVar}`,
 					],
 				},
 				_remaining: {
 					$let: {
-						vars: {
-							take: { $min: ['$_remaining', { $size: `$${idsVar}` }] },
-						},
+						vars: { take: { $min: ['$_remaining', { $size: `$${idsVar}` }] } },
 						in: { $subtract: ['$_remaining', '$$take'] },
 					},
 				},
@@ -212,25 +214,29 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
-	// 5) Materialise per type (root + each target) using a single $facet
-	// Sorting within each type is optional (id or lastUpdated or none)
+	// 5) Materialise from *resource* collections via $facet
 	const sortStageFor = (type) => {
-		if (sortBy === 'lastUpdated') return [{ $sort: { lastUpdated: sortDir } }];
-		if (sortBy === 'id') return [{ $sort: { [idField]: sortDir } }];
-		return [];
+		return [{ $sort: { _id: 1 } }];
 	};
 
 	const facet = {};
 
 	//////////////////////////////////////////////////////////////////////////////
-	// Root type facet
+	// Root facet (materialise the single root doc from its resource collection)
 	facet[rootType] = [
-		{ $project: { includedIds: '$_rootIncludedIds', overflowIds: '_rootOverflowIds' } },
+		{ $project: { includedIds: '$_rootIncludedIds', overflowIds: '$_rootOverflowIds' } },
 		{
 			$lookup: {
-				from: collection,
+				from: COLLECTIONS[rootType],
 				let: { ids: '$includedIds' },
-				pipeline: [{ $match: { resourceType: rootType } }, { $match: { $expr: { $in: [`$${idField}`, '$$ids'] } } }, ...sortStageFor(rootType)],
+				pipeline: [
+					{ $match: { $expr: { $in: [`$_id`, '$$ids'] } } },
+					...sortStageFor(rootType),
+					,
+					{
+						$project: fieldsToExcludeFromMaterialisedResources,
+					},
+				],
 				as: 'docs',
 			},
 		},
@@ -238,7 +244,7 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 	];
 
 	//////////////////////////////////////////////////////////////////////////////
-	// Target types facets
+	// Target type facets
 	for (const t of targetTypes) {
 		const includedVar = `_inc_${t}_ids`;
 		const overflowVar = `_ovf_${t}_ids`;
@@ -247,25 +253,30 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 			{ $project: { includedIds: `$${includedVar}`, overflowIds: `$${overflowVar}` } },
 			{
 				$lookup: {
-					from: collection,
+					from: COLLECTIONS[t], // <-- materialise from the real resource collection
 					let: { ids: '$includedIds' },
-					pipeline: [{ $match: { resourceType: t } }, { $match: { $expr: { $in: [`$${idField}`, '$$ids'] } } }, ...sortStageFor(t)],
+					pipeline: [
+						{ $match: { $expr: { $in: [`$_id`, '$$ids'] } } },
+						...sortStageFor(t),
+						{
+							$project: fieldsToExcludeFromMaterialisedResources,
+						},
+					],
 					as: 'docs',
 				},
 			},
-			{ $replaceWith: { items: '$docs', overflow: { overflowIds: '$overflowIds' } } },
+			{ $replaceWith: { items: '$docs', overflow: { resourceType: t, overflowIds: '$overflowIds' } } },
 		];
 	}
 
 	stages.push({ $facet: facet });
 
 	//////////////////////////////////////////////////////////////////////////////
-	// 6) Final shape: always include keys for rootType + every target type
+	// 6) Final shape
 	const resultsProjection = {};
-	const allTypes = [rootType, ...targetTypes];
 	for (const t of allTypes) {
 		resultsProjection[t] = {
-			$ifNull: [{ $arrayElemAt: [`$${t}`, 0] }, { items: [], overflow: { overflowIds: [] } }],
+			$ifNull: [{ $arrayElemAt: [`$${t}`, 0] }, { items: [], overflow: { resourceType: t, overflowIds: [] } }],
 		};
 	}
 
@@ -279,8 +290,11 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 	return stages;
 }
 
+//////////////////////////////////////////////////////////////////////////////
+// Helper Graph Functions
 ////////////////////////////////////////////////////////////////////////////////
-/** ===== helper graph functions (same as the optimised version) ===== */
+
+//////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
 function findPath(EDGES, startType, endType) {
@@ -347,40 +361,3 @@ module.exports = {
 	makeKey,
 	hashKey,
 };
-
-/* =========================
-Example usage:
-
-const { MongoClient } = require('mongodb');
-const { buildMaterialisedListsPipelineTotalMax } = require('./materialiser.totalMax');
-
-(async () => {
-  const mongo = await MongoClient.connect(process.env.MONGO_URI);
-  const coll = mongo.db().collection('materialisedAggregations');
-
-  // Example: totalMax = 4
-  // Allocation order = root (competition) → stages → events → teams
-  const pipeline = buildMaterialisedListsPipelineTotalMax({
-    rootType: 'competition',
-    rootExternalKey: '289175 @ fifa',
-    targetTypes: ['stage', 'event', 'team'],  // order controls who gets the remaining budget first
-    totalMax: 4,
-    idField: 'gamedayId',
-    // sortBy: 'lastUpdated', sortDir: -1,
-  });
-
-  const [result] = await coll.aggregate(pipeline, { allowDiskUse: true }).toArray();
-  console.log(JSON.stringify(result, null, 2));
-  await mongo.close();
-})();
-
-========================= */
-
-/*
-Indexing (once):
-
-db.materialisedAggregations.createIndex({ resourceType: 1, externalKey: 1 });  // root lookup
-db.materialisedAggregations.createIndex({ resourceType: 1, gamedayId: 1 });   // joins/materialise
-// If sorting by lastUpdated:
-db.materialisedAggregations.createIndex({ resourceType: 1, lastUpdated: -1, gamedayId: 1 });
-*/
