@@ -22,9 +22,10 @@ const fieldsToExcludeFromMaterialisedResources = {
 const pipeline = buildMaterialisedListsPipelineTotalMax({
 	rootType: 'competition',
 	rootExternalKey: '289175 @ fifa',
-	targetTypes: ['event', 'team'], // 'team', 'sgo'],
+	targetTypes: ['sgo', 'team', 'event'],
 	totalMax: 4,
 });
+console.log(JSON.stringify(pipeline));
 
 ////////////////////////////////////////////////////////////////////////////////
 // materialiser.totalMax.resources.js
@@ -35,23 +36,45 @@ const pipeline = buildMaterialisedListsPipelineTotalMax({
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Build a total-budget (totalMax) multi-target pipeline with shared-hop traversal.
+ * Builds a MongoDB aggregation pipeline for materializing related resources within a total document budget.
  *
- * @param {Object} params
- * @param {string} params.rootType
- * @param {string} params.rootExternalKey
- * @param {string[]} params.targetTypes             // order controls budget allocation (after root)
- * @param {number} params.totalMax                  // total number of docs to materialise (including root)
- * @param {Object} [params.edges]                   // override the default graph edges if needed
- * @param {Object} [params.collectionMap]          // map resourceType -> collection name for *materialisation*
- * @param {('id'|'lastUpdated'|null)} [params.sortBy='id'] // per-type sort inside materialised arrays
- * @param {1|-1} [params.sortDir=1]
- * @returns {import('mongodb').Document[]}
+ * This function creates an optimized pipeline that traverses the materialized aggregations collection
+ * to find related resources, then materializes the actual documents from their source collections.
+ * It uses a shared-hop approach to minimize duplicate traversals and applies a total budget constraint
+ * across all resource types in the specified order.
+ *
+ * Process flow:
+ * 1. Validates input parameters and resource type mappings
+ * 2. Computes shortest paths from root to each target type using graph traversal
+ * 3. Plans shared traversal steps to eliminate duplicate lookups
+ * 4. Builds aggregation stages that traverse materialized aggregations to collect IDs
+ * 5. Applies budget allocation (root first, then targets in specified order)
+ * 6. Materializes documents from actual resource collections via $facet operations
+ * 7. Structures final output with included items and overflow tracking
+ *
+ * The budget is consumed sequentially: root document takes 1 slot (if budget > 0), then
+ * each target type consumes up to its available documents within the remaining budget.
+ * Documents exceeding the budget are tracked in overflow arrays for pagination purposes.
+ *
+ * @param {Object} params - Configuration object
+ * @param {string} params.rootType - Resource type to start traversal from
+ * @param {string} params.rootExternalKey - External key identifying the root resource
+ * @param {string[]} params.targetTypes - Target resource types to materialize (order affects budget allocation)
+ * @param {number} params.totalMax - Maximum total documents to materialize across all types
+ * @param {Object} [params.edges] - Custom graph edges mapping (defaults to built-in resource relationships)
+ * @param {Object} [params.collectionMap] - Custom resource type to collection name mapping
+ * @returns {import('mongodb').Document[]} MongoDB aggregation pipeline stages
+ * @throws {Error} If required parameters are missing, invalid, or no path exists between types
  */
-function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, targetTypes, totalMax, edges, collectionMap, sortBy = 'id', sortDir = 1 }) {
+function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, targetTypes, totalMax, edges, collectionMap }) {
 	if (!rootType || !rootExternalKey) throw new Error('rootType and rootExternalKey are required');
 	if (!Array.isArray(targetTypes) || targetTypes.length === 0) throw new Error('targetTypes must be a non-empty array');
 	if (!Number.isInteger(totalMax) || totalMax < 0) throw new Error('totalMax must be a non-negative integer');
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Normalise the array, removing second or further instances of the same string in the array
+	targetTypes = [...new Set(targetTypes)];
+
 	////////////////////////////////////////////////////////////////////////////////
 	// Directed, field-labeled graph of materialised edges (extend as your views evolve)
 	const EDGES = edges || {
@@ -196,8 +219,17 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 						{ $gt: ['$_remaining', 0] },
 						{
 							$let: {
-								vars: { take: { $min: ['$_remaining', { $size: `$${idsVar}` }] } },
-								in: { $slice: [`$${idsVar}`, '$$take', { $subtract: [{ $size: `$${idsVar}` }, '$$take'] }] },
+								vars: {
+									take: { $min: ['$_remaining', { $size: `$${idsVar}` }] },
+									arraySize: { $size: `$${idsVar}` },
+								},
+								in: {
+									$cond: [
+										{ $eq: ['$$take', '$$arraySize'] },
+										[], // If we're taking everything, overflow is empty
+										{ $slice: [`$${idsVar}`, '$$take', { $subtract: ['$$arraySize', '$$take'] }] },
+									],
+								},
 							},
 						},
 						`$${idsVar}`,
@@ -295,8 +327,18 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 ////////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////////
-
-////////////////////////////////////////////////////////////////////////////////
+/**
+ * Finds the shortest path between two resource types in the materialized aggregations graph.
+ *
+ * Uses breadth-first search to traverse the directed graph of resource relationships,
+ * returning the sequence of hops (edges) needed to navigate from start to end type.
+ * Each hop contains the source type, field name, and destination type information.
+ *
+ * @param {Object} EDGES - Graph adjacency list mapping resource types to their outbound connections
+ * @param {string} startType - Source resource type to begin traversal
+ * @param {string} endType - Target resource type to reach
+ * @returns {Array|null} Array of hop objects [{from, field, to}] or null if no path exists
+ */
 function findPath(EDGES, startType, endType) {
 	if (startType === endType) return [];
 	const queue = [[startType, []]];
@@ -319,6 +361,16 @@ function findPath(EDGES, startType, endType) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+/**
+ * Consolidates multiple traversal paths into optimized execution steps with shared hop elimination.
+ *
+ * Analyzes all paths to identify common traversal segments, creating a minimal set of pipeline
+ * steps where shared hops are computed only once. Each step tracks its dependencies and depth
+ * to enable correct pipeline stage ordering and field referencing.
+ *
+ * @param {Array[]} paths - Array of path arrays, where each path contains hop objects
+ * @returns {Array} Sorted array of step objects with key, dependency info, and output field names
+ */
 function planSteps(paths) {
 	const seen = new Map();
 	const steps = [];
@@ -342,11 +394,34 @@ function planSteps(paths) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+/**
+ * Creates a unique identifier string for a graph traversal hop.
+ *
+ * @param {string} from - Source resource type
+ * @param {string} field - Field name containing the relationship
+ * @param {string} to - Destination resource type
+ * @returns {string} Formatted key string for the hop
+ */
 function makeKey(from, field, to) {
 	return `${from}.${field}->${to}`;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+/**
+ * Generates a hash key from a string using the djb2 hash algorithm with XOR variant.
+ *
+ * This function implements a fast, non-cryptographic hash function that converts
+ * a string into a compact alphanumeric identifier. The algorithm uses bit shifting
+ * and XOR operations to produce a deterministic hash value, then converts it to
+ * base-36 representation for a shorter string output.
+ *
+ * @param {string} s - The input string to hash
+ * @returns {string} A base-36 encoded hash key derived from the input string
+ *
+ * @example
+ * hashKey("hello world") // Returns something like "9jqo5u"
+ * hashKey("test") // Returns something like "2741c"
+ */
 function hashKey(s) {
 	let h = 5381;
 	for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
