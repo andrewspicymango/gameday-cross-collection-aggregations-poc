@@ -1,5 +1,15 @@
 // pipelineBuilder.js
 
+// Example: From a COMPETITION → fetch EVENTS + TEAMS + SGOS
+const pipeline = buildMaterialisedListsPipeline({
+	rootType: 'competition',
+	rootExternalKey: '289175 @ fifa',
+	targetTypes: ['event'], // 'team', 'sgo'],
+	maxCount: 100, // per-type default limit
+	perTypeMax: { team: 50 }, // optional overrides
+});
+
+////////////////////////////////////////////////////////////////////////////////
 /**
  * Build a MongoDB aggregation pipeline that:
  *  - loads a root doc (resourceType + externalKey) from 'materialisedAggregations',
@@ -83,6 +93,7 @@ function buildMaterialisedListsPipeline({ rootType, rootExternalKey, targetTypes
 	return stages;
 }
 
+////////////////////////////////////////////////////////////////////////////////
 /**
  * Build the per-targetType facet branch.
  * - Walks the hop path to produce targetIds
@@ -174,6 +185,7 @@ function buildBranchPipeline({ path, targetType, limit, collection }) {
 	return branch;
 }
 
+////////////////////////////////////////////////////////////////////////////////
 /**
  * BFS over field-based edges; returns [{from, field, to}, ...]
  */

@@ -12,6 +12,30 @@
 			"program": "${workspaceFolder}/src/index.js",
 			"outFiles": ["${workspaceFolder}/**/*.js"],
 			"args": ["-v"]
+		},
+		{
+			"type": "node",
+			"request": "launch",
+			"name": "node src/pipelines/pipelineBuilder.js",
+			"skipFiles": ["<node_internals>/**"],
+			"program": "${workspaceFolder}/src/pipelines/pipelineBuilder.js",
+			"outFiles": ["${workspaceFolder}/**/*.js"],
+			"args": []
+		},
+		{
+			"name": "Run fetch-aggregations.js",
+			"type": "node",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/fetch-aggregations.js",
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"args": ["fifa", "289175"],
+			"env": {
+				"AGG_BASE": "http://localhost:8080/1-0/aggregate"
+			},
+			"outputCapture": "std"
 		}
+
+		//src/pipelines/pipelineBuilder.js
 	]
 }
