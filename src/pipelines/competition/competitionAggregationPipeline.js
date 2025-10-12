@@ -43,6 +43,7 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
 			gamedayId: { $first: '$meta._id' },
 			_externalId: { $first: '$meta.competitionId' },
 			_externalIdScope: { $first: '$meta.competitionIdScope' },
+			name: { $first: '$meta.name' },
 			sgos: {
 				$ifNull: [{ $first: '$sgos.ids' }, []],
 			},
@@ -66,6 +67,7 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
 			gamedayId: '$gamedayId',
 			_externalId: '$_externalId',
 			_externalIdScope: '$_externalIdScope',
+			name: '$name',
 			lastUpdated: '$$NOW', // current pipeline execution time
 		},
 	},

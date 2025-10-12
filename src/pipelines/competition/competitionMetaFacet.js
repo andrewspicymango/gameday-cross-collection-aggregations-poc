@@ -6,6 +6,7 @@ const competitionMetaFacet = [
 			competitionId: '$_externalId',
 			competitionIdScope: '$_externalIdScope',
 			resourceType: '$resourceType',
+			name: { $getField: { field: '$defaultLanguage', input: '$name' } },
 		},
 	},
 ];
