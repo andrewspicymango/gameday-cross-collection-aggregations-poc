@@ -50,8 +50,35 @@ async function processCompetition(config, mongo, competitionIdScope, competition
 	const competitionResourceReference = { resourceType: 'competition', externalKey: competitionKey, objectId: competitionObjectId };
 	//////////////////////////////////////////////////////////////////////////////
 	// sgoMemberships._externalSgoId
-	// Create a set of keys that are in oldSgoExternalKeys but not in newSSgoExternalKeys
-	// This competition then needs to be removed all SGO aggregation docs for this set
+	await updateSgoCompetitionReferences(oldSgoExternalKeys, newSgoExternalKeys, mongo, config, competitionResourceReference, requestId);
+	//////////////////////////////////////////////////////////////////////////////
+	return newAggregationDoc;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/**
+ * Synchronizes SGO aggregation documents when competition SGO memberships change.
+ *
+ * Compares old vs new SGO external keys to identify membership changes, then updates
+ * the affected SGO aggregation documents to add/remove competition references accordingly.
+ * This maintains bidirectional consistency between competition and SGO aggregations.
+ *
+ * Process:
+ * 1. Identifies SGOs losing this competition (in old but not new keys)
+ * 2. Removes competition reference from those SGO aggregations
+ * 3. Identifies SGOs gaining this competition (in new but not old keys)
+ * 4. Adds competition reference to those SGO aggregations
+ *
+ * @async
+ * @param {string[]} oldSgoExternalKeys - Previous SGO keys from competition aggregation
+ * @param {string[]} newSgoExternalKeys - Current SGO keys from competition aggregation
+ * @param {Object} mongo - MongoDB connection with db.collection access
+ * @param {Object} config - Configuration containing mongo.matAggCollectionName
+ * @param {Object} competitionResourceReference - Competition reference object (resourceType, externalKey, objectId)
+ * @param {string} requestId - Unique identifier for request tracking/logging
+ * @returns {Promise<void>}
+ */
+async function updateSgoCompetitionReferences(oldSgoExternalKeys, newSgoExternalKeys, mongo, config, competitionResourceReference, requestId) {
 	const sgoExternalKeysToRemoveCompetitionFrom = oldSgoExternalKeys.filter((oldKey) => !newSgoExternalKeys.includes(oldKey));
 	for (const oldSgoExternalKey of sgoExternalKeysToRemoveCompetitionFrom) {
 		const sgoAggregationDocToRemoveCompetitionFrom = { resourceType: 'sgo', externalKey: { old: oldSgoExternalKey || null, new: null } };
@@ -64,8 +91,6 @@ async function processCompetition(config, mongo, competitionIdScope, competition
 		const sgoAggregationDocToAddCompetitionTo = { resourceType: 'sgo', externalKey: { old: null, new: newSgoExternalKey || null } };
 		await updateResourceReferencesInAggregationDocs(mongo, config, sgoAggregationDocToAddCompetitionTo, competitionResourceReference, requestId);
 	}
-	//////////////////////////////////////////////////////////////////////////////
-	return newAggregationDoc;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

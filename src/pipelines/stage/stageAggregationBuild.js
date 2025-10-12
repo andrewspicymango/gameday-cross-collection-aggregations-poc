@@ -91,17 +91,41 @@ async function processStage(config, mongo, stageIdScope, stageId, requestId) {
 	// Retrieve the new version of the stage aggregation and calculate new competition keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(stageAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	// FIX UPWARDS REFERENCES
+	// FIX OUTBOUND REFERENCES
 	const stageObjectId = newAggregationDoc?.gamedayId;
 	const stageKey = `${stageId}${keySeparator}${stageIdScope}`;
 	const stageResourceReference = { resourceType: 'stage', externalKey: stageKey, objectId: stageObjectId };
 	//////////////////////////////////////////////////////////////////////////////
 	// _externalCompetitionId
+	await updateCompetitionReferences(newAggregationDoc, oldCompetitionExternalKey, mongo, config, stageResourceReference, requestId);
+	//////////////////////////////////////////////////////////////////////////////
+	return newAggregationDoc;
+}
+////////////////////////////////////////////////////////////////////////////////
+/**
+ * Updates competition aggregation documents when a stage's competition membership changes.
+ *
+ * Compares the old vs new competition external keys to determine if the stage has moved
+ * between competitions, then updates the affected competition aggregation documents to
+ * add/remove the stage reference accordingly. This maintains bidirectional consistency
+ * between stage and competition aggregations.
+ *
+ * The function delegates to updateResourceReferencesInAggregationDocs to handle the
+ * actual addition/removal of stage references from competition aggregation documents.
+ *
+ * @async
+ * @param {Object} newAggregationDoc - Updated stage aggregation document
+ * @param {string|null} oldCompetitionExternalKey - Previous competition key from stage aggregation
+ * @param {Object} mongo - MongoDB connection with db.collection access
+ * @param {Object} config - Configuration containing mongo.matAggCollectionName
+ * @param {Object} stageResourceReference - Stage reference object (resourceType, externalKey, objectId)
+ * @param {string} requestId - Unique identifier for request tracking/logging
+ * @returns {Promise<void>}
+ */
+async function updateCompetitionReferences(newAggregationDoc, oldCompetitionExternalKey, mongo, config, stageResourceReference, requestId) {
 	const newCompetitionExternalKey = newAggregationDoc?.competitionKeys?.[0];
 	const competitionAggregationDocs = { resourceType: 'competition', externalKey: { old: oldCompetitionExternalKey || null, new: newCompetitionExternalKey || null } };
 	await updateResourceReferencesInAggregationDocs(mongo, config, competitionAggregationDocs, stageResourceReference, requestId);
-	//////////////////////////////////////////////////////////////////////////////
-	return newAggregationDoc;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
