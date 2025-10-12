@@ -89,20 +89,39 @@ async function main() {
 		mongo = await connectToMongo(config.mongo);
 
 		////////////////////////////////////////////////////////////////////////////
-		// Remember to create collection and indexes as needed
-		if (!(await collectionExists(mongo, config?.mongo?.matAggCollectionName))) {
-			warn(`Materialised Aggregation Collection ${config.mongo.matAggCollectionName} does not exist - creating...`);
-			await mongo.db.createCollection(config.mongo.matAggCollectionName);
-			info(`Created collection ${config.mongo.matAggCollectionName}`);
+		// Create collection and indexes as needed
+		const collectionName = config?.mongo?.matAggCollectionName || 'materialisedAggregations';
+		if (!(await collectionExists(mongo, collectionName))) {
+			warn(`Materialised Aggregation Collection ${collectionName} does not exist - creating...`);
+			await mongo.db.createCollection(collectionName);
+			info(`Created collection ${collectionName}`);
 		} else {
-			info(`Materialised Aggregation Collection ${config.mongo.matAggCollectionName} exists`);
+			info(`Materialised Aggregation Collection ${collectionName} exists`);
 		}
-		if (!(await indexExistsOnCollection(mongo, config.mongo.matAggCollectionName, config.mongo.matAggIndexIdAndScopeName))) {
-			warn(`Index ${config.mongo.matAggIndexIdAndScopeName} does not exist on collection ${config.mongo.matAggCollectionName} - creating...`);
-			await mongo.db.collection(config.mongo.matAggCollectionName).createIndex(config.mongo.matAggIndexIdAndScope, { unique: true });
-			info(`Created index ${config.mongo.matAggIndexIdAndScopeName} on collection ${config.mongo.matAggCollectionName}`);
+		////////////////////////////////////////////////////////////////////////////
+
+		////////////////////////////////////////////////////////////////////////////
+		// Ensure index on { resourceType: 1, externalKey: 1 } exists
+		// to efficiently find aggregation docs by externalKey when updating references
+		const externalKeyIndex = config?.mongo?.matAggIndexKeyAndScope || { resourceType: 1, externalKey: 1 };
+		const externalKeyIndexName = config?.mongo?.matAggIndexKeyAndScopeName || 'resourceType_1_externalKey_1';
+		if (!(await indexExistsOnCollection(mongo, collectionName, externalKeyIndexName))) {
+			warn(`Index ${externalKeyIndexName} does not exist on collection ${collectionName} - creating...`);
+			await mongo.db.collection(collectionName).createIndex(externalKeyIndex, { unique: true });
+			info(`Created index ${externalKeyIndexName} on collection ${collectionName}`);
 		} else {
-			info(`Index ${config.mongo.matAggIndexIdAndScopeName} exists on collection ${config.mongo.matAggCollectionName}`);
+			info(`Index ${externalKeyIndexName} exists on collection ${collectionName}`);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// Ensure index on { resourceType: 1, gamedayId: 1 } exists
+		const gamedayIdIndex = config?.mongo?.matAggIndexIdAndScope || { resourceType: 1, gamedayId: 1 };
+		const gamedayIdIndexName = config?.mongo?.matAggIndexIdAndScopeName || 'resourceType_1_gamedayId_1';
+		if (!(await indexExistsOnCollection(mongo, collectionName, gamedayIdIndexName))) {
+			warn(`Index ${gamedayIdIndexName} does not exist on collection ${collectionName} - creating...`);
+			await mongo.db.collection(collectionName).createIndex(gamedayIdIndex, { unique: true });
+			info(`Created index ${gamedayIdIndexName} on collection ${collectionName}`);
+		} else {
+			info(`Index ${gamedayIdIndexName} exists on collection ${collectionName}`);
 		}
 
 		////////////////////////////////////////////////////////////////////////////
