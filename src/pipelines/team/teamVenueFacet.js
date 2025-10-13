@@ -7,13 +7,7 @@ const teamVenueFacet = [
 			from: 'venues',
 			let: { vid: '$_externalVenueId', vids: '$_externalVenueIdScope' },
 			pipeline: [
-				{
-					$match: {
-						$expr: {
-							$and: [{ $eq: ['$_externalId', '$$vid'] }, { $eq: ['$_externalIdScope', '$$vids'] }],
-						},
-					},
-				},
+				{ $match: { $expr: { $and: [{ $eq: ['$_externalId', '$$vid'] }, { $eq: ['$_externalIdScope', '$$vids'] }] } } },
 				{ $project: { _id: 1, _externalId: 1, _externalIdScope: 1 } },
 			],
 			as: 'venues',

@@ -13,6 +13,7 @@ const { processStage } = require('../pipelines/stage/stageAggregationBuild.js');
 const { processEvent } = require('../pipelines/event/eventAggregationBuild.js');
 const { processTeam } = require('../pipelines/team/teamAggregationBuild.js');
 const { processSgo } = require('../pipelines/sgo/sgoAggregationBuild.js');
+const { processClub } = require('../pipelines/club/clubAggregationBuild.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -170,6 +171,11 @@ async function buildMaterialisedViewController(req, res) {
 		// SGOs
 		else if (schemaType.toLowerCase() == 'sgos') {
 			response = await processSgo(config, mongo, scope, requestedId, id);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// CLUBS
+		else if (schemaType.toLowerCase() == 'clubs') {
+			response = await processClub(config, mongo, scope, requestedId, id);
 		}
 		////////////////////////////////////////////////////////////////////////////
 		// ALL OTHERS NOT YET SUPPORTED
