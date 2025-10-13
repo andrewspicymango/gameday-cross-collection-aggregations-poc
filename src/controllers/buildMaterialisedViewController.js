@@ -14,6 +14,7 @@ const { processEvent } = require('../pipelines/event/eventAggregationBuild.js');
 const { processTeam } = require('../pipelines/team/teamAggregationBuild.js');
 const { processSgo } = require('../pipelines/sgo/sgoAggregationBuild.js');
 const { processClub } = require('../pipelines/club/clubAggregationBuild.js');
+const { processNation } = require('../pipelines/nation/nationAggregationBuild.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -135,7 +136,7 @@ async function buildMaterialisedViewController(req, res) {
 		});
 		return;
 	}
-
+	//////////////////////////////////////////////////////////////////////////////
 	const report = `Creating materialised aggregation view of single sports data for schemaType: ${schemaType}, scope: ${scope}, id: ${requestedId} with query strings ${JSON.stringify(
 		req.query
 	)}`;
@@ -176,6 +177,11 @@ async function buildMaterialisedViewController(req, res) {
 		// CLUBS
 		else if (schemaType.toLowerCase() == 'clubs') {
 			response = await processClub(config, mongo, scope, requestedId, id);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// NATIONS
+		else if (schemaType.toLowerCase() == 'nations') {
+			response = await processNation(config, mongo, scope, requestedId, id);
 		}
 		////////////////////////////////////////////////////////////////////////////
 		// ALL OTHERS NOT YET SUPPORTED

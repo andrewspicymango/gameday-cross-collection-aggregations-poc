@@ -77,7 +77,7 @@ async function processClub(config, mongo, clubIdScope, clubId, requestId) {
 	const newTeamExternalKeys = newAggregationDoc?.teamKeys || [];
 	const newVenueExternalKeys = newAggregationDoc?.venueKeys || [];
 	//////////////////////////////////////////////////////////////////////////////
-	// FIX UPWARDS REFERENCES
+	// FIX REFERENCES
 	const clubObjectId = newAggregationDoc?.gamedayId;
 	const clubKey = `${clubId}${keySeparator}${clubIdScope}`;
 	const clubResourceReference = { resourceType: 'club', externalKey: clubKey, objectId: clubObjectId };
