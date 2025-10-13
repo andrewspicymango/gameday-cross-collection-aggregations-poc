@@ -44,18 +44,10 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
 			_externalId: { $first: '$meta.competitionId' },
 			_externalIdScope: { $first: '$meta.competitionIdScope' },
 			name: { $first: '$meta.name' },
-			sgos: {
-				$ifNull: [{ $first: '$sgos.ids' }, []],
-			},
-			sgoKeys: {
-				$ifNull: [{ $first: '$sgos.keys' }, []],
-			},
-			stages: {
-				$ifNull: [{ $first: '$stages.ids' }, []],
-			},
-			stageKeys: {
-				$ifNull: [{ $first: '$stages.keys' }, []],
-			},
+			sgos: { $ifNull: [{ $first: '$sgos.ids' }, []] },
+			sgoKeys: { $ifNull: [{ $first: '$sgos.keys' }, []] },
+			stages: { $ifNull: [{ $first: '$stages.ids' }, []] },
+			stageKeys: { $ifNull: [{ $first: '$stages.keys' }, []] },
 		},
 	},
 

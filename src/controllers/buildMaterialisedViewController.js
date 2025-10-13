@@ -12,6 +12,7 @@ const { processCompetition } = require('../pipelines/competition/competitionAggr
 const { processStage } = require('../pipelines/stage/stageAggregationBuild.js');
 const { processEvent } = require('../pipelines/event/eventAggregationBuild.js');
 const { processTeam } = require('../pipelines/team/teamAggregationBuild.js');
+const { processSgo } = require('../pipelines/sgo/sgoAggregationBuild.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -25,6 +26,7 @@ const { processTeam } = require('../pipelines/team/teamAggregationBuild.js');
 //
 // curl -X POST localhost:8080/1-0/aggregate/competitions/fifa/289175
 // curl -X POST localhost:8080/1-0/aggregate/events/fifa/146186
+// curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/confederation_23914
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -163,6 +165,11 @@ async function buildMaterialisedViewController(req, res) {
 		// TEAMS
 		else if (schemaType.toLowerCase() == 'teams') {
 			response = await processTeam(config, mongo, scope, requestedId, id);
+		}
+		//////////////////////////////////////////////////////////////////////////
+		// SGOs
+		else if (schemaType.toLowerCase() == 'sgos') {
+			response = await processSgo(config, mongo, scope, requestedId, id);
 		}
 		////////////////////////////////////////////////////////////////////////////
 		// ALL OTHERS NOT YET SUPPORTED
