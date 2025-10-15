@@ -35,18 +35,10 @@ const pipeline = (config, EVENT_SCOPE, EVENT_ID) => [
 			stageKeys: { $ifNull: [{ $first: '$stages.keys' }, []] },
 			venues: { $ifNull: [{ $first: '$venues.ids' }, []] },
 			venueKeys: { $ifNull: [{ $first: '$venues.keys' }, []] },
-			teams: {
-				$setUnion: [{ $ifNull: [{ $first: '$teams.ids' }, []] }, { $ifNull: [{ $first: '$keyMoments.teamIds' }, []] }],
-			},
-			teamKeys: {
-				$setUnion: [{ $ifNull: [{ $first: '$teams.keys' }, []] }, { $ifNull: [{ $first: '$keyMoments.teamKeys' }, []] }],
-			},
-			sportsPersons: {
-				$setUnion: [{ $ifNull: [{ $first: '$sportsPersons.ids' }, []] }, { $ifNull: [{ $first: '$keyMoments.sportsPersonIds' }, []] }],
-			},
-			sportsPersonKeys: {
-				$setUnion: [{ $ifNull: [{ $first: '$sportsPersons.keys' }, []] }, { $ifNull: [{ $first: '$keyMoments.sportsPersonKeys' }, []] }],
-			},
+			teams: { $ifNull: [{ $first: '$teams.ids' }, []] },
+			teamKeys: { $ifNull: [{ $first: '$teams.keys' }, []] },
+			sportsPersons: { $ifNull: [{ $first: '$sportsPersons.ids' }, []] },
+			sportsPersonKeys: { $ifNull: [{ $first: '$sportsPersons.keys' }, []] },
 			keyMoments: { $ifNull: [{ $first: '$keyMoments.keyMomentIds' }, []] },
 			keyMomentKeys: { $ifNull: [{ $first: '$keyMoments.keyMomentKeys' }, []] },
 		},
