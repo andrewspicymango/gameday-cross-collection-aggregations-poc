@@ -2,41 +2,34 @@ const { keySeparator } = require('../constants');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Aggregation facet that enriches a club document with its related teams and
- * derives simplified identifier collections.
+ * Aggregation facet that enriches club documents with related teams data.
  *
- * Stages:
- * 1. $lookup (self-contained pipeline):
- *    - Joins the "teams" collection where a team's _externalClubId and
- *      _externalClubIdScope match the club's _externalId / _externalIdScope.
- *    - Projects only essential team identity fields.
- * 2. $project:
- *    - ids: Set of distinct MongoDB ObjectId values for matched teams.
- *    - keys: Set of distinct composite external keys for teams, formed by
- *      concatenating each team's _externalId, a runtime-supplied keySeparator,
- *      and its _externalIdScope.
+ * This facet performs a lookup to find teams belonging to a club based on matching
+ * external ID and scope, then creates collections of team IDs and external keys.
  *
- * Expects:
- * - keySeparator (string) to be defined in the surrounding scope.
+ * Pipeline stages:
+ * 1. $lookup - Joins teams collection where team's _externalClubId matches club's _externalId
+ * 2. $project - Creates 'ids' set of ObjectIds and 'keys' object mapping external keys to IDs
  *
- * @constant
- * @type {Array<object>}
- * @summary Facet pipeline to attach related teams and derive unique team id/key sets.
+ * @type {Array<Object>}
+ * @requires keySeparator - String separator for constructing composite keys
+ * @returns {Object} Object with 'ids' array and 'keys' object for matched teams
+ *
+ * @example
+ * // Usage in aggregation pipeline
+ * db.clubs.aggregate([
+ *   { $facet: { teams: clubTeamsFacet } }
+ * ])
  */
 const clubTeamsFacet = [
 	{
 		$lookup: {
 			from: 'teams',
-			let: { cid: '$_externalId', cs: '$_externalIdScope' },
+			let: { thisClubId: '$_externalId', thisClubIdScope: '$_externalIdScope' },
 			pipeline: [
-				{
-					$match: {
-						$expr: {
-							$and: [{ $eq: ['$_externalClubId', '$$cid'] }, { $eq: ['$_externalClubIdScope', '$$cs'] }],
-						},
-					},
-				},
+				{ $match: { $expr: { $and: [{ $eq: ['$_externalClubId', '$$thisClubId'] }, { $eq: ['$_externalClubIdScope', '$$thisClubIdScope'] }] } } },
 				{ $project: { _id: 1, _externalId: 1, _externalIdScope: 1 } },
+				{ $set: { key: { $concat: ['$_externalId', keySeparator, '$_externalIdScope'] } } },
 			],
 			as: 'teams',
 		},
@@ -44,7 +37,7 @@ const clubTeamsFacet = [
 	{
 		$project: {
 			ids: { $setUnion: [{ $map: { input: '$teams', as: 't', in: '$$t._id' } }, []] },
-			keys: { $setUnion: [{ $map: { input: '$teams', as: 't', in: { $concat: ['$$t._externalId', keySeparator, '$$t._externalIdScope'] } } }, []] },
+			keys: { $cond: [{ $gt: [{ $size: '$teams' }, 0] }, { $arrayToObject: { $map: { input: '$teams', as: 's', in: ['$$s.key', '$$s._id'] } } }, {}] },
 		},
 	},
 ];

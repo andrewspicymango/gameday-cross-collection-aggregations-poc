@@ -2,6 +2,7 @@ const { clubMetaFacet } = require('./clubMetaFacet');
 const { clubTeamsFacet } = require('./clubTeamsFacet');
 const { clubVenuesFacet } = require('./clubVenuesFacet');
 const { clubSgosFacet } = require('./clubSgosFacet');
+const { clubStaffFacet } = require('./clubStaffFacet');
 const { keyInAggregation } = require('../constants');
 const { keySeparator } = require('../constants');
 
@@ -17,6 +18,7 @@ const pipeline = (config, CLUB_SCOPE, CLUB_ID) => [
 		$facet: {
 			meta: clubMetaFacet,
 			sgos: clubSgosFacet,
+			staff: clubStaffFacet,
 			teams: clubTeamsFacet,
 			venues: clubVenuesFacet,
 		},
@@ -34,6 +36,8 @@ const pipeline = (config, CLUB_SCOPE, CLUB_ID) => [
 			name: { $first: '$meta.name' },
 			sgos: { $ifNull: [{ $first: '$sgos.ids' }, []] },
 			sgoKeys: { $ifNull: [{ $first: '$sgos.keys' }, []] },
+			staff: { $ifNull: [{ $first: '$staff.ids' }, []] },
+			staffKeys: { $ifNull: [{ $first: '$staff.keys' }, []] },
 			teamIds: { $ifNull: [{ $first: '$teams.ids' }, []] },
 			teamKeys: { $ifNull: [{ $first: '$teams.keys' }, []] },
 			venueIds: { $ifNull: [{ $first: '$venues.ids' }, []] },

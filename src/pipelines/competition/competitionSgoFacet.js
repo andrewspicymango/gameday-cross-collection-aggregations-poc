@@ -2,51 +2,20 @@ const { keySeparator } = require('../constants');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Aggregation facet pipeline that resolves SGO references found on a document's
- * sgoMemberships array into unique MongoDB ObjectIds and composed keys.
+ * MongoDB aggregation pipeline facet for processing competition SGO (Sports Governing Organization) memberships.
  *
- * Stages and purpose:
- *  - $project { sgoMemberships: 1 }:
- *      Keep only the sgoMemberships array for downstream processing.
- *  - $unwind '$sgoMemberships':
- *      Expand the array so each membership becomes its own document.
- *  - $match { 'sgoMemberships._externalSgoId': { $type: 'string' }, 'sgoMemberships._externalSgoIdScope': { $type: 'string' } }:
- *      Filter to memberships that contain both external id and scope as strings.
- *  - $group { _id: { id, scope } }:
- *      Deduplicate memberships by external id + scope.
- *  - $project { sgoId, sgoScope }:
- *      Expose those deduped external id and scope values as fields for lookup.
- *  - $lookup from 'sgos' with pipeline using $expr:
- *      Look up matching documents in the "sgos" collection where
- *        _externalId == sgoId AND _externalIdScope == sgoScope.
- *      Inside the lookup pipeline a key is constructed by concatenating
- *      sgoId, a keySeparator, and sgoScope. Note: keySeparator must be
- *      available when the pipeline is built (e.g. injected into the pipeline
- *      document or otherwise captured by the code that constructs the pipeline).
- *      The lookup projects only {_id, key}.
- *  - $unwind { path: '$sgo', preserveNullAndEmptyArrays: false }:
- *      Discard non-matching lookups (only keep successful matches).
- *  - $group { _id: null, ids: { $addToSet: '$sgo._id' }, keys: { $addToSet: '$sgo.key' } }:
- *      Collect unique ObjectIds and unique key strings.
- *  - $project { ids, keys }:
- *      Return the final shape.
+ * This pipeline:
+ * 1. Extracts and unwinds sgoMemberships from competition documents
+ * 2. Filters for valid external SGO IDs and scopes (string types only)
+ * 3. Groups by unique SGO ID and scope combinations
+ * 4. Performs lookup to find corresponding SGO documents in the 'sgos' collection
+ * 5. Creates key-value pairs using SGO external ID, scope, and document ID
+ * 6. Aggregates results into arrays of SGO IDs and a key-value mapping object
  *
- * Input expectations:
- *  - The input document should contain an optional array field:
- *      sgoMemberships: Array<{ _externalSgoId?: string, _externalSgoIdScope?: string, ... }>
- *
- * Output shape:
- *  - { ids: ObjectId[], keys: string[] }
- *    - ids: unique ObjectId values from the matched documents in the "sgos" collection
- *    - keys: unique composed string keys (sgoId + keySeparator + sgoScope)
- *
- * Important notes:
- *  - Memberships lacking string external id or scope are ignored.
- *  - Non-matching lookups are removed by the unwind with preserveNullAndEmptyArrays: false.
- *  - Deduplication is performed via $group + $addToSet.
- *  - The pipeline expects the "sgos" collection to expose _externalId and _externalIdScope fields.
- *
- * @constant {Array<Object>} sgoFacet  Aggregation pipeline array to be used as a facet or sub-pipeline.
+ * @type {Array<Object>} MongoDB aggregation pipeline stages
+ * @returns {Object} Result containing:
+ *   - ids: Array of unique SGO document IDs
+ *   - keys: Object mapping SGO keys (id + scope) to document IDs
  */
 const competitionSgoFacet = [
 	{ $project: { sgoMemberships: 1 } },

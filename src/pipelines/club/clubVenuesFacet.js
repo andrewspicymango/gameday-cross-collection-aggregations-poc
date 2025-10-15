@@ -1,34 +1,35 @@
 const { keySeparator } = require('../constants');
 
 ////////////////////////////////////////////////////////////////////////////////
+
 /**
- * Aggregation facet pipeline that resolves a club's related venue documents and derives
- * normalized identifier collections.
+ * MongoDB aggregation facet that performs a lookup to join club venues with venue documents.
  *
- * Stages:
- * 1. $lookup (pipeline form) against the "venues" collection matching both _externalId
- *    and _externalIdScope to the club's corresponding external venue fields. Projects
- *    only {_id, _externalId, _externalIdScope} into "venues".
- * 2. $project builds:
- *    - ids: a de-duplicated array (set) of matched venue ObjectIds.
- *    - keys: a de-duplicated array of composite string keys combining each venue's
- *      externalId, a keySeparator (from outer scope), and its externalIdScope.
+ * @description This facet:
+ * 1. Performs a $lookup to match venues by external ID and scope
+ * 2. Creates a compound key from venue ID and scope with a separator
+ * 3. Projects the results into two formats:
+ *    - `ids`: Array of unique venue ObjectIds
+ *    - `keys`: Object mapping compound keys to venue ObjectIds
  *
- * When no venues match, ids and keys become empty arrays. Designed for reuse inside
- * a larger aggregation (e.g., $facet) to supply venue reference metadata.
+ * @type {Array<Object>} MongoDB aggregation pipeline stages
  *
- * @constant
- * @type {import('mongodb').Document[]} MongoDB aggregation pipeline stages.
- * @see https://www.mongodb.com/docs/manual/reference/operator/aggregation/lookup/
+ * @example
+ * // Input document structure expected:
+ * // { _externalVenueId: "venue123", _externalVenueIdScope: "scope1" }
+ *
+ * // Output structure:
+ * // { ids: [ObjectId("...")], keys: { "venue123|scope1": ObjectId("...") } }
  */
 const clubVenuesFacet = [
 	{
 		$lookup: {
 			from: 'venues',
-			let: { vid: '$_externalVenueId', vids: '$_externalVenueIdScope' },
+			let: { targetVenueId: '$_externalVenueId', targetVenueIdScope: '$_externalVenueIdScope' },
 			pipeline: [
-				{ $match: { $expr: { $and: [{ $eq: ['$_externalId', '$$vid'] }, { $eq: ['$_externalIdScope', '$$vids'] }] } } },
+				{ $match: { $expr: { $and: [{ $eq: ['$_externalId', '$$targetVenueId'] }, { $eq: ['$_externalIdScope', '$$targetVenueIdScope'] }] } } },
 				{ $project: { _id: 1, _externalId: 1, _externalIdScope: 1 } },
+				{ $set: { key: { $concat: ['$$targetVenueId', keySeparator, '$$targetVenueIdScope'] } } },
 			],
 			as: 'venues',
 		},
@@ -36,7 +37,7 @@ const clubVenuesFacet = [
 	{
 		$project: {
 			ids: { $setUnion: [{ $map: { input: '$venues', as: 'v', in: '$$v._id' } }, []] },
-			keys: { $setUnion: [{ $map: { input: '$venues', as: 'v', in: { $concat: ['$$v._externalId', keySeparator, '$$v._externalIdScope'] } } }, []] },
+			keys: { $cond: [{ $gt: [{ $size: '$venues' }, 0] }, { $arrayToObject: { $map: { input: '$venues', as: 's', in: ['$$s.key', '$$s._id'] } } }, {}] },
 		},
 	},
 ];

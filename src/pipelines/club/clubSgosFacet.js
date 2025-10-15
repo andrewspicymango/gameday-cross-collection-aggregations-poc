@@ -2,51 +2,18 @@ const { keySeparator } = require('../constants');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Aggregation facet pipeline that resolves SGO references found on a document's
- * sgoMemberships array into unique MongoDB ObjectIds and composed keys.
+ * MongoDB aggregation pipeline facet for extracting and mapping club SGO (Sports Governing Organization) data.
  *
- * Stages and purpose:
- *  - $project { sgoMemberships: 1 }:
- *      Keep only the sgoMemberships array for downstream processing.
- *  - $unwind '$sgoMemberships':
- *      Expand the array so each membership becomes its own document.
- *  - $match { 'sgoMemberships._externalSgoId': { $type: 'string' }, 'sgoMemberships._externalSgoIdScope': { $type: 'string' } }:
- *      Filter to memberships that contain both external id and scope as strings.
- *  - $group { _id: { id, scope } }:
- *      Deduplicate memberships by external id + scope.
- *  - $project { sgoId, sgoScope }:
- *      Expose those deduped external id and scope values as fields for lookup.
- *  - $lookup from 'sgos' with pipeline using $expr:
- *      Look up matching documents in the "sgos" collection where
- *        _externalId == sgoId AND _externalIdScope == sgoScope.
- *      Inside the lookup pipeline a key is constructed by concatenating
- *      sgoId, a keySeparator, and sgoScope. Note: keySeparator must be
- *      available when the pipeline is built (e.g. injected into the pipeline
- *      document or otherwise captured by the code that constructs the pipeline).
- *      The lookup projects only {_id, key}.
- *  - $unwind { path: '$sgo', preserveNullAndEmptyArrays: false }:
- *      Discard non-matching lookups (only keep successful matches).
- *  - $group { _id: null, ids: { $addToSet: '$sgo._id' }, keys: { $addToSet: '$sgo.key' } }:
- *      Collect unique ObjectIds and unique key strings.
- *  - $project { ids, keys }:
- *      Return the final shape.
+ * This pipeline processes club documents to:
+ * 1. Extract SGO memberships with valid external IDs and scopes
+ * 2. Look up corresponding SGO documents from the 'sgos' collection
+ * 3. Create key-value pairs mapping SGO keys to their MongoDB ObjectIds
+ * 4. Return both an array of unique SGO IDs and a key-object mapping
  *
- * Input expectations:
- *  - The input document should contain an optional array field:
- *      sgoMemberships: Array<{ _externalSgoId?: string, _externalSgoIdScope?: string, ... }>
- *
- * Output shape:
- *  - { ids: ObjectId[], keys: string[] }
- *    - ids: unique ObjectId values from the matched documents in the "sgos" collection
- *    - keys: unique composed string keys (sgoId + keySeparator + sgoScope)
- *
- * Important notes:
- *  - Memberships lacking string external id or scope are ignored.
- *  - Non-matching lookups are removed by the unwind with preserveNullAndEmptyArrays: false.
- *  - Deduplication is performed via $group + $addToSet.
- *  - The pipeline expects the "sgos" collection to expose _externalId and _externalIdScope fields.
- *
- * @constant {Array<Object>} sgoFacet  Aggregation pipeline array to be used as a facet or sub-pipeline.
+ * @type {Array<Object>} MongoDB aggregation pipeline stages
+ * @returns {Object} Result containing:
+ *   - ids: Array of unique SGO ObjectIds
+ *   - keys: Object mapping SGO keys (id + scope) to ObjectIds
  */
 const clubSgosFacet = [
 	{ $project: { sgoMemberships: 1 } },
@@ -63,12 +30,13 @@ const clubSgosFacet = [
 				{ $set: { key: { $concat: ['$$sgoId', keySeparator, '$$sgoScope'] } } },
 				{ $project: { _id: 1, key: 1 } },
 			],
-			as: 'sgo',
+			as: 'sgoDocs',
 		},
 	},
-	{ $unwind: { path: '$sgo', preserveNullAndEmptyArrays: false } },
-	{ $group: { _id: null, ids: { $addToSet: '$sgo._id' }, keys: { $addToSet: '$sgo.key' } } },
-	{ $project: { _id: 0, ids: 1, keys: 1 } },
+	{ $project: { pairs: { $map: { input: { $ifNull: ['$sgoDocs', []] }, as: 'd', in: { k: '$$d.key', v: '$$d._id' } } } } },
+	{ $unwind: { path: '$pairs', preserveNullAndEmptyArrays: false } },
+	{ $group: { _id: null, ids: { $addToSet: '$pairs.v' }, kvps: { $addToSet: '$pairs' } } },
+	{ $project: { _id: 0, ids: 1, keys: { $arrayToObject: '$kvps' } } },
 ];
 
 ////////////////////////////////////////////////////////////////////////////////
