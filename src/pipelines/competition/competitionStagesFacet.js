@@ -43,22 +43,18 @@ const competitionStagesFacet = [
 			from: 'stages',
 			let: { cid: '$_externalId', cs: '$_externalIdScope' },
 			pipeline: [
-				{
-					$match: {
-						$expr: {
-							$and: [{ $eq: ['$_externalCompetitionId', '$$cid'] }, { $eq: ['$_externalCompetitionIdScope', '$$cs'] }],
-						},
-					},
-				},
-				{ $project: { _id: 1, _externalId: 1, _externalIdScope: 1 } },
+				{ $match: { $expr: { $and: [{ $eq: ['$_externalCompetitionId', '$$cid'] }, { $eq: ['$_externalCompetitionIdScope', '$$cs'] }] } } },
+				{ $project: { _id: 1, stageKey: { $concat: ['$_externalId', keySeparator, '$_externalIdScope'] } } },
+				{ $match: { stageKey: { $ne: null } } },
 			],
-			as: 'stages',
+			as: 'stageDocs',
 		},
 	},
 	{
 		$project: {
-			ids: { $setUnion: [{ $map: { input: '$stages', as: 's', in: '$$s._id' } }, []] },
-			keys: { $setUnion: [{ $map: { input: '$stages', as: 's', in: { $concat: ['$$s._externalId', keySeparator, '$$s._externalIdScope'] } } }, []] },
+			_id: 0,
+			ids: { $setUnion: [{ $map: { input: '$stageDocs', as: 's', in: '$$s._id' } }, []] },
+			keys: { $cond: [{ $gt: [{ $size: '$stageDocs' }, 0] }, { $arrayToObject: { $map: { input: '$stageDocs', as: 's', in: ['$$s.stageKey', '$$s._id'] } } }, {}] },
 		},
 	},
 ];

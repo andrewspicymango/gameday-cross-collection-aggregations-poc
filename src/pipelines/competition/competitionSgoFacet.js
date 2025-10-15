@@ -63,12 +63,13 @@ const competitionSgoFacet = [
 				{ $set: { key: { $concat: ['$$sgoId', keySeparator, '$$sgoScope'] } } },
 				{ $project: { _id: 1, key: 1 } },
 			],
-			as: 'sgo',
+			as: 'sgoDocs',
 		},
 	},
-	{ $unwind: { path: '$sgo', preserveNullAndEmptyArrays: false } },
-	{ $group: { _id: null, ids: { $addToSet: '$sgo._id' }, keys: { $addToSet: '$sgo.key' } } },
-	{ $project: { _id: 0, ids: 1, keys: 1 } },
+	{ $project: { pairs: { $map: { input: { $ifNull: ['$sgoDocs', []] }, as: 'd', in: { k: '$$d.key', v: '$$d._id' } } } } },
+	{ $unwind: { path: '$pairs', preserveNullAndEmptyArrays: false } },
+	{ $group: { _id: null, ids: { $addToSet: '$pairs.v' }, kvps: { $addToSet: '$pairs' } } },
+	{ $project: { _id: 0, ids: 1, keys: { $arrayToObject: '$kvps' } } },
 ];
 
 ////////////////////////////////////////////////////////////////////////////////
