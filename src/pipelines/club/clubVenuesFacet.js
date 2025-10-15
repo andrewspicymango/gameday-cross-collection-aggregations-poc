@@ -29,7 +29,7 @@ const clubVenuesFacet = [
 			pipeline: [
 				{ $match: { $expr: { $and: [{ $eq: ['$_externalId', '$$targetVenueId'] }, { $eq: ['$_externalIdScope', '$$targetVenueIdScope'] }] } } },
 				{ $project: { _id: 1, _externalId: 1, _externalIdScope: 1 } },
-				{ $set: { key: { $concat: ['$$targetVenueId', keySeparator, '$$targetVenueIdScope'] } } },
+				{ $set: { key: { $concat: ['$_externalId', keySeparator, '$_externalIdScope'] } } },
 			],
 			as: 'venues',
 		},

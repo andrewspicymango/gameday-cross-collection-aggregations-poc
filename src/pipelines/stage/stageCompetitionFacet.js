@@ -2,52 +2,44 @@ const { keySeparator } = require('../constants');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Aggregation facet stages that resolve external competition identifiers into internal competition ids and
- * composite external keys.
+ * MongoDB aggregation facet that looks up competition documents and creates ID mappings.
  *
- * Behavior:
- * - 1st stage ($lookup):
- *   - Looks up matching documents in the "competitions" collection.
- *   - Uses let bindings: cid <- _externalCompetitionId, cids <- _externalCompetitionIdScope.
- *   - Matches competitions where _externalId == $$cid AND _externalIdScope == $$cids.
- *   - Projects only the fields: {_id, _externalId, _externalIdScope}.
- *   - Result is stored in the "competitions" array on each input document.
+ * This facet performs a lookup operation to find competitions that match the stage's
+ * external competition ID and scope, then creates two output formats:
+ * - `ids`: Array of ObjectIds for matched competitions
+ * - `keys`: Object mapping competition keys (externalId + scope) to their ObjectIds
  *
- * - 2nd stage ($project):
- *   - ids: produces a de-duplicated set (setUnion) of matched competition _id values.
- *   - keys: produces a de-duplicated set of concatenated external keys built as
- *           _externalId + keySeparator + _externalIdScope for each matched competition.
+ * The lookup matches competitions where:
+ * - Competition's _externalId equals stage's _externalCompetitionId
+ * - Competition's _externalIdScope equals stage's _externalCompetitionIdScope
  *
- * Notes / Requirements:
- * - Input documents must contain the fields _externalCompetitionId and _externalCompetitionIdScope.
- * - The symbol keySeparator must be available in the aggregation scope (e.g., defined earlier) and is used as
- *   the delimiter when building composite keys.
- * - The facet returns arrays (possibly empty) and is intended for use inside a larger aggregation pipeline
- *   (for example within a $facet or as a sub-pipeline) to produce canonical internal ids and external identifier keys
- *   for downstream operations (joins, grouping, lookups).
+ * @type {Array<Object>} MongoDB aggregation pipeline stages
  *
- * Output shape (per facet document):
- *   {
- *     ids: ObjectId[],   // unique internal competition _id values
- *     keys: string[]     // unique composite external key strings
- *   }
+ * @example
+ * // Input stage document:
+ * { _externalCompetitionId: "comp123", _externalCompetitionIdScope: "source1" }
  *
- * @constant {Array<Object>} stageCompetitionFacet - Aggregation stages implementing the competition lookup + projection.
+ * // Output:
+ * {
+ *   ids: [ObjectId("..."), ObjectId("...")],
+ *   keys: { "comp123|source1": ObjectId("...") }
+ * }
  */
 const stageCompetitionFacet = [
 	{
 		$lookup: {
 			from: 'competitions',
-			let: { cid: '$_externalCompetitionId', cids: '$_externalCompetitionIdScope' },
+			let: { targetCompetitionId: '$_externalCompetitionId', targetCompetitionIdScope: '$_externalCompetitionIdScope' },
 			pipeline: [
 				{
 					$match: {
 						$expr: {
-							$and: [{ $eq: ['$_externalId', '$$cid'] }, { $eq: ['$_externalIdScope', '$$cids'] }],
+							$and: [{ $eq: ['$_externalId', '$$targetCompetitionId'] }, { $eq: ['$_externalIdScope', '$$targetCompetitionIdScope'] }],
 						},
 					},
 				},
 				{ $project: { _id: 1, _externalId: 1, _externalIdScope: 1 } },
+				{ $set: { key: { $concat: ['$_externalId', keySeparator, '$_externalIdScope'] } } },
 			],
 			as: 'competitions',
 		},
@@ -55,7 +47,7 @@ const stageCompetitionFacet = [
 	{
 		$project: {
 			ids: { $setUnion: [{ $map: { input: '$competitions', as: 'c', in: '$$c._id' } }, []] },
-			keys: { $setUnion: [{ $map: { input: '$competitions', as: 'c', in: { $concat: ['$$c._externalId', keySeparator, '$$c._externalIdScope'] } } }, []] },
+			keys: { $cond: [{ $gt: [{ $size: '$competitions' }, 0] }, { $arrayToObject: { $map: { input: '$competitions', as: 's', in: ['$$s.key', '$$s._id'] } } }, {}] },
 		},
 	},
 ];

@@ -2,61 +2,28 @@ const { keySeparator } = require('../constants');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * stageEventsFacet
+ * MongoDB aggregation pipeline facet that performs a lookup to find all events
+ * associated with a stage and transforms the results into convenient formats.
  *
- * MongoDB aggregation stages that attach related event identifiers and deduplicated composite keys
- * for a stage document by performing a correlated lookup into the "events" collection.
+ * The facet:
+ * 1. Looks up events from the 'events' collection matching the stage's external ID and scope
+ * 2. Projects only essential fields (_id, _externalId, _externalIdScope) from matched events
+ * 3. Creates a composite key by concatenating externalId and externalIdScope
+ * 4. Returns two outputs:
+ *    - `ids`: Array of event ObjectIds for the stage
+ *    - `keys`: Object mapping composite keys to ObjectIds (empty object if no events)
  *
- * Behavior:
- * - $lookup
- *   - from: "events"
- *   - let: { sid: '$_externalId', ss: '$_externalIdScope' }
- *   - pipeline: matches event documents where
- *       $_externalStageId == $$sid AND $_externalStageIdScope == $$ss
- *     and projects only the fields: _id, _externalId, _externalIdScope
- *
- * - $project
- *   - ids: a deduplicated array of event _id values. Computed as:
- *       $setUnion of (map over the looked-up events returning $$e._id) and an empty array,
- *     which ensures uniqueness and returns [] when there are no events.
- *   - keys: a deduplicated array of composite string keys for each event. Computed as:
- *       $setUnion of (map over the looked-up events returning the concatenation
- *       of $$e._externalId, keySeparator, and $$e._externalIdScope) and an empty array.
- *     Note: keySeparator must be defined in the surrounding scope (e.g. a variable injected
- *     into the aggregation context) and should be a string.
- *
- * Output shape (per input document):
- * {
- *   ids: Array<Any>      // typically ObjectId values from events._id, deduplicated
- *   keys: Array<string>  // deduplicated composite keys: "<eventExternalId><sep><eventScope>"
- * }
- *
- * Requirements / assumptions:
- * - Input documents must have _externalId and _externalIdScope fields that identify the stage.
- * - The events collection uses $_externalStageId and $_externalStageIdScope to reference stages.
- * - keySeparator is expected to be available and is used to build the composite key string.
- *
- * Intended use:
- * - Include this array of stages inside an aggregation pipeline (e.g. as part of a $facet
- *   or spliced into a pipeline for stage documents) to efficiently gather related event ids
- *   and keys for each stage record.
- *
- * @type {Array<Object>}
+ * @type {Array<Object>} MongoDB aggregation pipeline stages
  */
 const stageEventsFacet = [
 	{
 		$lookup: {
 			from: 'events',
-			let: { sid: '$_externalId', ss: '$_externalIdScope' },
+			let: { thisStageId: '$_externalId', thisStageIdScope: '$_externalIdScope' },
 			pipeline: [
-				{
-					$match: {
-						$expr: {
-							$and: [{ $eq: ['$_externalStageId', '$$sid'] }, { $eq: ['$_externalStageIdScope', '$$ss'] }],
-						},
-					},
-				},
+				{ $match: { $expr: { $and: [{ $eq: ['$_externalStageId', '$$thisStageId'] }, { $eq: ['$_externalStageIdScope', '$$thisStageIdScope'] }] } } },
 				{ $project: { _id: 1, _externalId: 1, _externalIdScope: 1 } },
+				{ $set: { key: { $concat: ['$_externalId', keySeparator, '$_externalIdScope'] } } },
 			],
 			as: 'events',
 		},
@@ -64,7 +31,7 @@ const stageEventsFacet = [
 	{
 		$project: {
 			ids: { $setUnion: [{ $map: { input: '$events', as: 'e', in: '$$e._id' } }, []] },
-			keys: { $setUnion: [{ $map: { input: '$events', as: 'e', in: { $concat: ['$$e._externalId', keySeparator, '$$e._externalIdScope'] } } }, []] },
+			keys: { $cond: [{ $gt: [{ $size: '$events' }, 0] }, { $arrayToObject: { $map: { input: '$events', as: 's', in: ['$$s.key', '$$s._id'] } } }, {}] },
 		},
 	},
 ];
