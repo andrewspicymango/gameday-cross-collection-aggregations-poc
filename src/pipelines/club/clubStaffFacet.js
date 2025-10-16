@@ -1,5 +1,4 @@
-const { keySeparator } = require('../constants');
-const { clubSeparator } = require('../staff/staffAggregationPipeline');
+const { keySeparator, clubSeparator } = require('../constants');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
