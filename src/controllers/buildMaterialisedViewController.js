@@ -17,6 +17,7 @@ const { processClub } = require('../pipelines/club/clubAggregationBuild.js');
 const { processNation } = require('../pipelines/nation/nationAggregationBuild.js');
 const { processStaff } = require('../pipelines/staff/staffAggregationBuild.js');
 const { processVenue } = require('../pipelines/venue/venueAggregationBuild.js');
+const { processKeyMoment } = require('../pipelines/keyMoment/keyMomentAggregationBuild.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -27,6 +28,9 @@ const { processVenue } = require('../pipelines/venue/venueAggregationBuild.js');
 // curl -X POST localhost:8080/1-0/aggregate/stages/bblapi/2023:BBL:league
 // curl -X POST localhost:8080/1-0/aggregate/events/bblapi/6ea116b7-7c38-47b3-a1ee-db90108034b2
 // curl -X POST localhost:8080/1-0/aggregate/teams/bblapi/9a259543-a5a3-4f51-b352-9ceeffb4ae15
+// curl -X POST localhost:8080/1-0/aggregate/events/bblscb/2003994
+// curl -X POST localhost:8080/1-0/aggregate/km/bblscb/2003994/urn:gd:km:type:action/urn:gd:km:subtype:startMatch/2025-10-03T15:50:06Z
+
 //
 // curl -X POST localhost:8080/1-0/aggregate/competitions/fifa/289175
 // curl -X POST localhost:8080/1-0/aggregate/events/fifa/146186
@@ -319,5 +323,54 @@ async function buildMaterialisedViewControllerForClubStaff(req, res) {
 	}
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// router.post('/aggregate/km/:eventIdScope/:eventId/:type/:subType/:dateTime', buildMaterialisedViewControllerForKeyMoment);
+async function buildMaterialisedViewControllerForKeyMoment(req, res) {
+	const id = uuid.v4();
+	debug(`${req.method} ${req.url}${req.hostname != undefined ? ' [called from ' + req.hostname + ']' : ''}`, id);
+	const eventIdScope = req.params.eventIdScope;
+	const eventId = req.params.eventId;
+	const type = req.params.type;
+	const subType = req.params.subType;
+	const dateTime = req.params.dateTime;
+	const mongo = config?.mongo;
+
+	//////////////////////////////////////////////////////////////////////////////
+	if (!mongo || !mongo.db || !mongo.client) {
+		warn(`No MongoDB connection available`, 'WD0050', 500, 'Database Connection Error');
+		send400(res, {
+			message: 'Database connection is not available.',
+			errorCode: 'WD0050', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+			category: 'Database Connection Error',
+		});
+		return;
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	const report = `Creating materialised aggregation view of single sports data for schemaType: keyMoment, event id scope: ${eventIdScope}, event id: ${eventId}, type: ${type}, sub type: ${subType}, date time: ${dateTime} with query strings ${JSON.stringify(
+		req.query
+	)}`;
+	info(report, id);
+	try {
+		const response = await processKeyMoment(config, mongo, eventIdScope, eventId, type, subType, dateTime, id);
+		////////////////////////////////////////////////////////////////////////////
+		// Return the result
+		const body = {
+			status: 200,
+			service: config?.serviceName,
+			message: `Materialised aggregation views created for keyMoment resource ${eventIdScope}/${eventId} and type ${type} and sub type ${subType} and date time ${dateTime}`,
+			response,
+		};
+		send200(res, body, config);
+	} catch (err) {
+		send500(res, err.message);
+		return;
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = { buildMaterialisedViewControllerForIdScopeResources, buildMaterialisedViewControllerForTeamStaff, buildMaterialisedViewControllerForClubStaff };
+module.exports = {
+	buildMaterialisedViewControllerForIdScopeResources,
+	buildMaterialisedViewControllerForTeamStaff,
+	buildMaterialisedViewControllerForClubStaff,
+	buildMaterialisedViewControllerForKeyMoment,
+};
