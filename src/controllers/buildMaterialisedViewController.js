@@ -35,6 +35,9 @@ const { processStaff } = require('../pipelines/staff/staffAggregationBuild.js');
 // curl -X POST localhost:8080/1-0/aggregate/nations/fifa/srb
 // curl -X POST localhost:8080/1-0/aggregate/staff/sp/fifa/394503/team/fifa/289175_1884422
 // curl -X POST localhost:8080/1-0/aggregate/teams/fifa/289175_1954283
+// curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/confederation_0
+// curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/confederation_23915
+// curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/association_21914
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
