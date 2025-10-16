@@ -2,55 +2,23 @@ const { keySeparator } = require('../constants');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Team Events Facet
+ * MongoDB aggregation pipeline that creates a facet for team events lookup.
  *
- * Aggregation facet pipeline for resolving event references for a given team.
+ * This pipeline performs the following operations:
+ * 1. Adds a teamKey field by concatenating team's _externalId and _externalIdScope
+ * 2. Performs a lookup on the 'events' collection to find events where the team participates
+ * 3. Matches events where the teamKey exists in the participants array
+ * 4. Projects event data with eventPair containing id, scope, and key
+ * 5. Filters out events without valid eventPair data
+ * 6. Returns deduplicated event IDs and a key-to-ID mapping object
  *
- * This pipeline is intended to be executed in the context of a team document that exposes
- * the following fields on the current pipeline input doc:
- *   - _externalId
- *   - _externalIdScope
+ * @type {Array<Object>} MongoDB aggregation pipeline stages
+ * @requires keySeparator - Global variable used to join external ID components
  *
- * Behaviour summary:
- *   1. Build the team key string using the global `keySeparator` value:
- *      "<_externalId><keySeparator><_externalIdScope>".
- *   2. Lookup event documents (collection: "events") that have this team as a participant
- *      by matching the derived team key against participant entries with _externalTeamId and
- *      _externalTeamIdScope properties in the participants array.
- *   3. From each matched event, create event pairs with id, scope, and composite key.
- *      Only events with valid _externalId and _externalIdScope are included.
- *   4. Project a final object containing:
- *        - ids: unique set of matched events._id (typically ObjectId)
- *        - keys: unique set of external key strings ("<id><keySeparator><scope>") for the events
- *
- * Important notes / assumptions:
- *   - A variable keySeparator must be available in the outer JS scope where this pipeline is defined;
- *     it is used to compose the stable composite keys in all lookups.
- *   - Only events with string-typed, non-empty _externalId and _externalIdScope are considered.
- *   - Team participation is determined by matching team keys in the participants array.
- *   - Uniqueness is enforced via $setUnion; the final projection produces de-duplicated arrays.
- *   - If no matches are found, the pipeline yields empty arrays for both ids and keys.
- *
- * Result shape (per team input document):
- *   {
- *     ids: [ /* Array of events._id values (unique) *\/ ],
- *     keys: [ /* Array of "<id><keySeparator><scope>" strings (unique) *\/ ]
- *   }
- *
- * Collections referenced:
- *   - "events"
- *
- * Usage:
- *   - Can be used as a facet or inline pipeline stage when aggregating teams to resolve
- *     the set of event references where the team participates.
- *
- * @constant
- * @type {Array<Object>}
- * @name teamEventsFacet
+ * @returns {Object} Result contains 'ids' array and 'keys' object mapping
  */
 const teamEventsFacet = [
 	{ $addFields: { teamKey: { $concat: ['$_externalId', keySeparator, '$_externalIdScope'] } } },
-
 	{
 		$lookup: {
 			from: 'events',
@@ -59,17 +27,9 @@ const teamEventsFacet = [
 				{
 					$match: {
 						$expr: {
-							$gt: [
-								{
-									$size: {
-										$filter: {
-											input: { $ifNull: ['$participants', []] },
-											as: 'p',
-											cond: { $eq: [{ $concat: ['$$p._externalTeamId', keySeparator, '$$p._externalTeamIdScope'] }, '$$teamKey'] },
-										},
-									},
-								},
-								0,
+							$in: [
+								'$$teamKey',
+								{ $map: { input: { $ifNull: ['$participants', []] }, as: 'p', in: { $concat: ['$$p._externalTeamId', keySeparator, '$$p._externalTeamIdScope'] } } },
 							],
 						},
 					},
@@ -102,12 +62,11 @@ const teamEventsFacet = [
 			as: 'eventDocs',
 		},
 	},
-
 	{
 		$project: {
 			_id: 0,
 			ids: { $setUnion: [{ $map: { input: '$eventDocs', as: 'e', in: '$$e._id' } }, []] },
-			keys: { $setUnion: [{ $map: { input: '$eventDocs', as: 'e', in: '$$e.eventPair.key' } }, []] },
+			keys: { $cond: [{ $gt: [{ $size: '$eventDocs' }, 0] }, { $arrayToObject: { $map: { input: '$eventDocs', as: 'e', in: ['$$e.eventPair.key', '$$e._id'] } } }, {}] },
 		},
 	},
 ];

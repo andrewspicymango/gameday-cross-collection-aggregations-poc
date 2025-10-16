@@ -1,6 +1,6 @@
 const { teamMetaFacet } = require('./teamMetaFacet');
 const { teamClubFacet } = require('./teamClubFacet');
-const { teamSportsPersonFacet } = require('./teamSportsPersonFacet');
+const { teamMembersSportsPersonFacet } = require('./teamMembersSportsPersonFacet');
 const { teamNationFacet } = require('./teamNationFacet');
 const { teamVenueFacet } = require('./teamVenueFacet');
 const { teamStaffFacet } = require('./teamStaffFacet');
@@ -39,7 +39,7 @@ const pipeline = (config, TEAM_SCOPE, TEAM_ID) => [
 		$facet: {
 			meta: teamMetaFacet,
 			clubs: teamClubFacet,
-			sportsPersons: teamSportsPersonFacet,
+			sportsPersons: teamMembersSportsPersonFacet,
 			nations: teamNationFacet,
 			venues: teamVenueFacet,
 			staff: teamStaffFacet,
@@ -57,42 +57,18 @@ const pipeline = (config, TEAM_SCOPE, TEAM_ID) => [
 			_externalId: { $first: '$meta.teamId' },
 			_externalIdScope: { $first: '$meta.teamIdScope' },
 			name: { $first: '$meta.name' },
-			events: {
-				$ifNull: [{ $first: '$events.ids' }, []],
-			},
-			eventKeys: {
-				$ifNull: [{ $first: '$events.keys' }, []],
-			},
-			clubs: {
-				$ifNull: [{ $first: '$clubs.ids' }, []],
-			},
-			clubKeys: {
-				$ifNull: [{ $first: '$clubs.keys' }, []],
-			},
-			sportsPersons: {
-				$ifNull: [{ $first: '$sportsPersons.ids' }, []],
-			},
-			sportsPersonKeys: {
-				$ifNull: [{ $first: '$sportsPersons.keys' }, []],
-			},
-			nations: {
-				$ifNull: [{ $first: '$nations.ids' }, []],
-			},
-			nationKeys: {
-				$ifNull: [{ $first: '$nations.keys' }, []],
-			},
-			staff: {
-				$ifNull: [{ $first: '$staff.ids' }, []],
-			},
-			staffKeys: {
-				$ifNull: [{ $first: '$staff.keys' }, []],
-			},
-			venues: {
-				$ifNull: [{ $first: '$venues.ids' }, []],
-			},
-			venueKeys: {
-				$ifNull: [{ $first: '$venues.keys' }, []],
-			},
+			clubs: { $ifNull: [{ $first: '$clubs.ids' }, []] },
+			clubKeys: { $ifNull: [{ $first: '$clubs.keys' }, []] },
+			events: { $ifNull: [{ $first: '$events.ids' }, []] },
+			eventKeys: { $ifNull: [{ $first: '$events.keys' }, []] },
+			nations: { $ifNull: [{ $first: '$nations.ids' }, []] },
+			nationKeys: { $ifNull: [{ $first: '$nations.keys' }, []] },
+			sportsPersons: { $ifNull: [{ $first: '$sportsPersons.ids' }, []] },
+			sportsPersonKeys: { $ifNull: [{ $first: '$sportsPersons.keys' }, []] },
+			staff: { $ifNull: [{ $first: '$staff.ids' }, []] },
+			staffKeys: { $ifNull: [{ $first: '$staff.keys' }, []] },
+			venues: { $ifNull: [{ $first: '$venues.ids' }, []] },
+			venueKeys: { $ifNull: [{ $first: '$venues.keys' }, []] },
 		},
 	},
 

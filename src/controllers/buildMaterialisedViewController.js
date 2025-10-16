@@ -15,6 +15,7 @@ const { processTeam } = require('../pipelines/team/teamAggregationBuild.js');
 const { processSgo } = require('../pipelines/sgo/sgoAggregationBuild.js');
 const { processClub } = require('../pipelines/club/clubAggregationBuild.js');
 const { processNation } = require('../pipelines/nation/nationAggregationBuild.js');
+const { processStaff } = require('../pipelines/staff/staffAggregationBuild.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -29,6 +30,11 @@ const { processNation } = require('../pipelines/nation/nationAggregationBuild.js
 // curl -X POST localhost:8080/1-0/aggregate/competitions/fifa/289175
 // curl -X POST localhost:8080/1-0/aggregate/events/fifa/146186
 // curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/confederation_23914
+// curl -X POST localhost:8080/1-0/aggregate/clubs/fifa/1950154
+// curl -X POST localhost:8080/1-0/aggregate/stages/fifa/289179
+// curl -X POST localhost:8080/1-0/aggregate/nations/fifa/srb
+// curl -X POST localhost:8080/1-0/aggregate/staff/sp/fifa/394503/team/fifa/289175_1884422
+// curl -X POST localhost:8080/1-0/aggregate/teams/fifa/289175_1954283
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -105,7 +111,7 @@ const checkSchema = function (schema) {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-async function buildMaterialisedViewController(req, res) {
+async function buildMaterialisedViewControllerForIdScopeResources(req, res) {
 	const id = uuid.v4();
 	debug(`${req.method} ${req.url}${req.hostname != undefined ? ' [called from ' + req.hostname + ']' : ''}`, id);
 	const schemaType = req.params.schemaType;
@@ -218,4 +224,90 @@ async function buildMaterialisedViewController(req, res) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = { buildMaterialisedViewController };
+// router.post('/aggregate/staff/sp/:spScope/:spId/team/:teamIdScope/:teamId', buildMaterialisedViewControllerForTeamStaff);
+async function buildMaterialisedViewControllerForTeamStaff(req, res) {
+	const id = uuid.v4();
+	debug(`${req.method} ${req.url}${req.hostname != undefined ? ' [called from ' + req.hostname + ']' : ''}`, id);
+	const spScope = req.params.spScope;
+	const spId = req.params.spId;
+	const teamIdScope = req.params.teamIdScope;
+	const teamId = req.params.teamId;
+	const mongo = config?.mongo;
+
+	//////////////////////////////////////////////////////////////////////////////
+	if (!mongo || !mongo.db || !mongo.client) {
+		warn(`No MongoDB connection available`, 'WD0050', 500, 'Database Connection Error');
+		send400(res, {
+			message: 'Database connection is not available.',
+			errorCode: 'WD0050', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+			category: 'Database Connection Error',
+		});
+		return;
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	const report = `Creating materialised aggregation view of single sports data for schemaType: staff, sports person scope: ${spScope}, sports person id: ${spId}, team id scope: ${teamIdScope}, team id: ${teamId} with query strings ${JSON.stringify(
+		req.query
+	)}`;
+	info(report, id);
+	try {
+		const response = await processStaff(config, mongo, spId, spScope, teamId, teamIdScope, null, null, id);
+		////////////////////////////////////////////////////////////////////////////
+		// Return the result
+		const body = {
+			status: 200,
+			service: config?.serviceName,
+			message: `Materialised aggregation views created for staff resource SP ${spScope}/${spId} and Team ${teamIdScope}/${teamId}`,
+			response,
+		};
+		send200(res, body, config);
+	} catch (err) {
+		send500(res, err.message);
+		return;
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// router.post('/aggregate/staff/sp/:spScope/:spId/club/:clubIdScope/:clubId', buildMaterialisedViewControllerForClubStaff);
+async function buildMaterialisedViewControllerForClubStaff(req, res) {
+	const id = uuid.v4();
+	debug(`${req.method} ${req.url}${req.hostname != undefined ? ' [called from ' + req.hostname + ']' : ''}`, id);
+	const spScope = req.params.spScope;
+	const spId = req.params.spId;
+	const clubIdScope = req.params.clubIdScope;
+	const clubId = req.params.clubId;
+	const mongo = config?.mongo;
+
+	//////////////////////////////////////////////////////////////////////////////
+	if (!mongo || !mongo.db || !mongo.client) {
+		warn(`No MongoDB connection available`, 'WD0050', 500, 'Database Connection Error');
+		send400(res, {
+			message: 'Database connection is not available.',
+			errorCode: 'WD0050', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+			category: 'Database Connection Error',
+		});
+		return;
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	const report = `Creating materialised aggregation view of single sports data for schemaType: staff, sports person scope: ${spScope}, sports person id: ${spId}, club id scope: ${clubIdScope}, club id: ${clubId} with query strings ${JSON.stringify(
+		req.query
+	)}`;
+	info(report, id);
+	try {
+		const response = await processStaff(config, mongo, spId, spScope, null, null, clubId, clubIdScope, id);
+		////////////////////////////////////////////////////////////////////////////
+		// Return the result
+		const body = {
+			status: 200,
+			service: config?.serviceName,
+			message: `Materialised aggregation views created for staff resource SP ${spScope}/${spId} and Club ${clubIdScope}/${clubId}`,
+			response,
+		};
+		send200(res, body, config);
+	} catch (err) {
+		send500(res, err.message);
+		return;
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+module.exports = { buildMaterialisedViewControllerForIdScopeResources, buildMaterialisedViewControllerForTeamStaff, buildMaterialisedViewControllerForClubStaff };
