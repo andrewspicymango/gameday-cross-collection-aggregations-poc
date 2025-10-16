@@ -16,6 +16,7 @@ const { processSgo } = require('../pipelines/sgo/sgoAggregationBuild.js');
 const { processClub } = require('../pipelines/club/clubAggregationBuild.js');
 const { processNation } = require('../pipelines/nation/nationAggregationBuild.js');
 const { processStaff } = require('../pipelines/staff/staffAggregationBuild.js');
+const { processVenue } = require('../pipelines/venue/venueAggregationBuild.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -38,6 +39,7 @@ const { processStaff } = require('../pipelines/staff/staffAggregationBuild.js');
 // curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/confederation_0
 // curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/confederation_23915
 // curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/association_21914
+// curl -X POST localhost:8080/1-0/aggregate/venues/fifa/5000247
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -191,6 +193,11 @@ async function buildMaterialisedViewControllerForIdScopeResources(req, res) {
 		// NATIONS
 		else if (schemaType.toLowerCase() == 'nations') {
 			response = await processNation(config, mongo, scope, requestedId, id);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// VENUES
+		else if (schemaType.toLowerCase() == 'venues') {
+			response = await processVenue(config, mongo, scope, requestedId, id);
 		}
 		////////////////////////////////////////////////////////////////////////////
 		// ALL OTHERS NOT YET SUPPORTED
