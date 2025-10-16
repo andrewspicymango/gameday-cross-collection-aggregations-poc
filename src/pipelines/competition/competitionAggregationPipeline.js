@@ -1,5 +1,5 @@
 const { competitionMetaFacet } = require('./competitionMetaFacet');
-const { competitionSgoFacet } = require('./competitionSgoFacet');
+const { competitionSgosFacet } = require('./competitionSgoFacet');
 const { competitionStagesFacet } = require('./competitionStagesFacet');
 const { keySeparator } = require('../constants');
 const { keyInAggregation } = require('../constants');
@@ -28,7 +28,7 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
 	// $facet: runs the provided sub-facets (sgos, stages, events, teams, sportsPersons, venues, meta)
 	{
 		$facet: {
-			sgos: competitionSgoFacet,
+			sgos: competitionSgosFacet,
 			stages: competitionStagesFacet,
 			meta: competitionMetaFacet,
 		},
