@@ -5,6 +5,7 @@ const { teamNationFacet } = require('./teamNationFacet');
 const { teamVenueFacet } = require('./teamVenueFacet');
 const { teamStaffFacet } = require('./teamStaffFacet');
 const { teamEventsFacet } = require('./teamEventsFacet');
+const { teamSgoFacet } = require('./teamSgoFacet');
 const { keySeparator } = require('../constants');
 const { keyInAggregation } = require('../constants');
 
@@ -44,6 +45,7 @@ const pipeline = (config, TEAM_SCOPE, TEAM_ID) => [
 			venues: teamVenueFacet,
 			staff: teamStaffFacet,
 			events: teamEventsFacet,
+			sgos: teamSgoFacet,
 		},
 	},
 
@@ -63,6 +65,8 @@ const pipeline = (config, TEAM_SCOPE, TEAM_ID) => [
 			eventKeys: { $ifNull: [{ $first: '$events.keys' }, []] },
 			nations: { $ifNull: [{ $first: '$nations.ids' }, []] },
 			nationKeys: { $ifNull: [{ $first: '$nations.keys' }, []] },
+			sgos: { $ifNull: [{ $first: '$sgos.ids' }, []] },
+			sgoKeys: { $ifNull: [{ $first: '$sgos.keys' }, []] },
 			sportsPersons: { $ifNull: [{ $first: '$sportsPersons.ids' }, []] },
 			sportsPersonKeys: { $ifNull: [{ $first: '$sportsPersons.keys' }, []] },
 			staff: { $ifNull: [{ $first: '$staff.ids' }, []] },
