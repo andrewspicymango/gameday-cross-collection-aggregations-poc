@@ -17,7 +17,7 @@ const clubMetaFacet = [
 			_id: 1,
 			clubId: '$_externalId',
 			clubIdScope: '$_externalIdScope',
-			resourceType: '$resourceType',
+			resourceType: { $toLower: '$resourceType' },
 			name: { $getField: { field: '$defaultLanguage', input: '$name' } },
 		},
 	},

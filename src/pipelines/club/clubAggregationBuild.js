@@ -4,7 +4,7 @@
 // to maintain bidirectional consistency.
 ////////////////////////////////////////////////////////////////////////////////
 const _ = require('lodash');
-const { debug } = require('../../log');
+const { debug, warn } = require('../../log');
 const { runPipeline } = require('../runPipeline');
 const { pipeline, queryForClubAggregationDoc } = require('./clubAggregationPipeline');
 const { buildOperationsForReferenceChange } = require('../referenceManagement');

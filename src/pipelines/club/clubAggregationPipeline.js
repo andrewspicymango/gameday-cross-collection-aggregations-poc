@@ -48,7 +48,7 @@ const pipeline = (config, CLUB_SCOPE, CLUB_ID) => [
 	//////////////////////////////////////////////////////////////////////////////
 	{
 		$addFields: {
-			resourceType: '$resourceType',
+			resourceType: { $toLower: '$resourceType' },
 			externalKey: '$externalKey',
 			gamedayId: '$gamedayId',
 			_externalId: '$_externalId',
