@@ -64,7 +64,7 @@ const pipeline = (config, SGO_SCOPE, SGO_ID) => [
 	//////////////////////////////////////////////////////////////////////////////
 	{
 		$addFields: {
-			resourceType: '$resourceType',
+			resourceType: { $toLower: '$resourceType' },
 			externalKey: '$externalKey',
 			gamedayId: '$gamedayId',
 			_externalId: '$_externalId',

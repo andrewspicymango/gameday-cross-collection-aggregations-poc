@@ -40,7 +40,7 @@ const sgoMetaFacet = [
 		$project: {
 			gamedayId: '$_id',
 			externalKey: { $concat: ['$_externalId', keySeparator, '$_externalIdScope'] },
-			resourceType: { $literal: 'sgo' },
+			resourceType: { $toLower: '$resourceType' },
 			name: { $getField: { field: '$defaultLanguage', input: '$name' } },
 		},
 	},

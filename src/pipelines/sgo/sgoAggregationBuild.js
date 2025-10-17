@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 const _ = require('lodash');
-const { debug } = require('../../log');
+const { debug, warn } = require('../../log');
 const { runPipeline } = require('../runPipeline');
 const { pipeline, queryForSgoAggregationDoc } = require('./sgoAggregationPipeline');
 const { buildOperationsForReferenceChange } = require('../referenceManagement');
