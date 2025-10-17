@@ -5,7 +5,7 @@ const venuesMetaFacet = [
 			_id: 1,
 			venueId: '$_externalId',
 			venueIdScope: '$_externalIdScope',
-			resourceType: '$resourceType',
+			resourceType: { $toLower: '$resourceType' },
 			name: { $getField: { field: '$defaultLanguage', input: '$name' } },
 		},
 	},

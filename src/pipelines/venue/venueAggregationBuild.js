@@ -34,8 +34,13 @@ async function processVenue(config, mongo, venueIdScope, venueId, requestId) {
 	// Retrieve the new version of the venue aggregation and calculate new outbound keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(venueAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-	await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	if (_.isObject(newAggregationDoc)) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	} else {
+		warn(`Failed to build new aggregation document`, requestId);
+		return null;
+	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
 }
