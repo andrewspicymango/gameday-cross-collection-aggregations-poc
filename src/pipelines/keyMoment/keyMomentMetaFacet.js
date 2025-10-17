@@ -8,7 +8,7 @@ const keyMomentMetaFacet = [
 			keyMomentEventIdScope: '$_externalEventIdScope',
 			keyMomentType: '$type',
 			keyMomentSubType: '$subType',
-			resourceType: '$resourceType',
+			resourceType: { $toLower: '$resourceType' },
 			name: {
 				$cond: {
 					if: { $eq: [{ $getField: { field: '$defaultLanguage', input: '$name' } }, null] },

@@ -51,7 +51,7 @@ const pipeline = (config, EVENT_SCOPE, EVENT_ID, TYPE, SUBTYPE, DATETIME) => {
 				subType: { $first: '$meta.keyMomentSubType' },
 				dateTime: { $first: '$meta.keyMomentDateTime' },
 				name: { $first: '$meta.name' },
-				eventIds: { $ifNull: [{ $first: '$events.ids' }, []] },
+				events: { $ifNull: [{ $first: '$events.ids' }, []] },
 				eventKeys: { $ifNull: [{ $first: '$events.keys' }, []] },
 				teams: { $ifNull: [{ $first: '$teams.ids' }, []] },
 				teamKeys: { $ifNull: [{ $first: '$teams.keys' }, []] },
