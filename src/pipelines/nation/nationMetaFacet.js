@@ -8,15 +8,15 @@
  *  - name: language-specific selection using defaultLanguage
  */
 const nationMetaFacet = [
-    {
-        $project: {
-            _id: 1,
-            nationId: '$_externalId',
-            nationIdScope: '$_externalIdScope',
-            resourceType: '$resourceType',
-            name: { $getField: { field: '$defaultLanguage', input: '$name' } },
-        },
-    },
+	{
+		$project: {
+			_id: 1,
+			nationId: '$_externalId',
+			nationIdScope: '$_externalIdScope',
+			resourceType: { $toLower: '$resourceType' },
+			name: { $getField: { field: '$defaultLanguage', input: '$name' } },
+		},
+	},
 ];
 
 ////////////////////////////////////////////////////////////////////////////////

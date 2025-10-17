@@ -3,7 +3,7 @@
 // (teams, venues, sgos) to maintain bidirectional consistency.
 ////////////////////////////////////////////////////////////////////////////////
 const _ = require('lodash');
-const { debug } = require('../../log');
+const { debug, warn } = require('../../log');
 const { runPipeline } = require('../runPipeline');
 const { pipeline, queryForNationAggregationDoc } = require('./nationAggregationPipeline');
 const { buildOperationsForReferenceChange } = require('../referenceManagement');
