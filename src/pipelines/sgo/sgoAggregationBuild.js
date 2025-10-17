@@ -63,8 +63,13 @@ async function processSgo(config, mongo, sgoIdScope, sgoId, requestId) {
 	// Retrieve the new version of the SGO aggregation and calculate new outbound keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(sgoAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-	await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	if (_.isObject(newAggregationDoc)) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	} else {
+		warn(`Failed to build new aggregation document`, requestId);
+		return null;
+	}
 
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;

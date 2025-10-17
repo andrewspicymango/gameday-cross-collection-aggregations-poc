@@ -37,8 +37,13 @@ async function processKeyMoment(config, mongo, eventIdScope, eventId, type, subT
 	// Retrieve the new version of the event aggregation
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(keyMomentAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-	await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	if (_.isObject(newAggregationDoc)) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	} else {
+		warn(`Failed to build new aggregation document`, requestId);
+		return null;
+	}
 	return newAggregationDoc;
 }
 

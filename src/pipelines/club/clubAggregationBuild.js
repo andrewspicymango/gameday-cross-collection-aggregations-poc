@@ -67,8 +67,13 @@ async function processClub(config, mongo, clubIdScope, clubId, requestId) {
 	// Retrieve the new version of the club aggregation and calculate new outbound keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(clubAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-	await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	if (_.isObject(newAggregationDoc)) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	} else {
+		warn(`Failed to build new aggregation document`, requestId);
+		return null;
+	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
 }

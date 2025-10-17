@@ -42,8 +42,13 @@ async function processCompetition(config, mongo, competitionIdScope, competition
 	// Retrieve the new version of the competition aggregation and calculate new competition keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(competitionAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-	await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	if (_.isObject(newAggregationDoc)) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	} else {
+		warn(`Failed to build new aggregation document`, requestId);
+		return null;
+	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
 }
