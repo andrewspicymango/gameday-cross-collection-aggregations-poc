@@ -55,8 +55,13 @@ async function processStage(config, mongo, stageIdScope, stageId, requestId) {
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(stageAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
 	// Compare old and new aggregation documents to determine if references need to be updated
-	const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-	await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	if (_.isObject(newAggregationDoc)) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	} else {
+		warn(`Failed to build new aggregation document`, requestId);
+		return null;
+	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
 }

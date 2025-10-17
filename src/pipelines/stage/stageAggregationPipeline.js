@@ -71,7 +71,7 @@ const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 	//////////////////////////////////////////////////////////////////////////////
 	{
 		$addFields: {
-			resourceType: '$resourceType',
+			resourceType: { $toLower: '$resourceType' },
 			externalKey: '$externalKey',
 			gamedayId: '$gamedayId',
 			_externalId: '$_externalId',
