@@ -5,7 +5,7 @@
 // competition view when those entities change.
 ////////////////////////////////////////////////////////////////////////////////
 const _ = require('lodash');
-const { debug } = require('../../log');
+const { debug, warn } = require('../../log');
 const { runPipeline } = require('../runPipeline');
 const { pipeline } = require('./competitionAggregationPipeline');
 const { queryForCompetitionAggregationDoc } = require('./competitionAggregationPipeline');

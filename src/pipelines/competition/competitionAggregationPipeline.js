@@ -54,7 +54,7 @@ const pipeline = (config, COMP_SCOPE, COMP_ID) => [
 	//////////////////////////////////////////////////////////////////////////////
 	{
 		$addFields: {
-			resourceType: '$resourceType',
+			resourceType: { $toLower: '$resourceType' },
 			externalKey: '$externalKey',
 			gamedayId: '$gamedayId',
 			_externalId: '$_externalId',
