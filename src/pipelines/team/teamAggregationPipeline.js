@@ -81,7 +81,7 @@ const pipeline = (config, TEAM_SCOPE, TEAM_ID) => [
 	// and stamps lastUpdated with $$NOW (pipeline execution time)
 	{
 		$addFields: {
-			resourceType: '$resourceType',
+			resourceType: { $toLower: '$resourceType' },
 			externalKey: '$externalKey',
 			gamedayId: '$gamedayId',
 			_externalId: '$_externalId',

@@ -36,8 +36,13 @@ async function processTeam(config, mongo, teamIdScope, teamId, requestId) {
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(teamAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
 	// Update references based on changes
-	const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-	await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	if (_.isObject(newAggregationDoc)) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	} else {
+		warn(`Failed to build new aggregation document`, requestId);
+		return null;
+	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
 }
