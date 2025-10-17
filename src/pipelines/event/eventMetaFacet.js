@@ -4,7 +4,7 @@ const eventMetaFacet = [
 			_id: 1,
 			eventId: '$_externalId',
 			eventIdScope: '$_externalIdScope',
-			resourceType: { $literal: 'event' },
+			resourceType: { $toLower: '$resourceType' },
 			name: { $getField: { field: '$defaultLanguage', input: '$name' } },
 		},
 	},
