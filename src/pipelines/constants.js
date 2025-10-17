@@ -1,6 +1,7 @@
 const keySeparator = ' @ ';
 const teamSeparator = ' /team/ ';
 const clubSeparator = ' /club/ ';
+const nationSeparator = ' /nation/ ';
 const keyInAggregation = ['resourceType', 'externalKey'];
 
 module.exports = {
@@ -8,4 +9,5 @@ module.exports = {
 	keyInAggregation,
 	teamSeparator,
 	clubSeparator,
+	nationSeparator,
 };

@@ -42,6 +42,7 @@ function propStringOrNull(prop) {
 //    ... etc,
 // }
 function buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc, operations = null) {
+	if (!_.isObject(newAggregationDoc)) throw new Error('Invalid parameters: newAggregationDoc must be an object');
 	if (!_.isString(newAggregationDoc?.resourceType)) throw new Error('Invalid parameters: newAggregationDoc.resourceType must be a string');
 	if (!_.isString(newAggregationDoc?.externalKey)) throw new Error('Invalid parameters: newAggregationDoc.externalKey must be an object');
 	if (!_.isObject(newAggregationDoc?.gamedayId)) throw new Error('Invalid parameters: newAggregationDoc.gamedayId must be an object');

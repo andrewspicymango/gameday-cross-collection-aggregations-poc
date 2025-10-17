@@ -48,6 +48,7 @@ const { processSportsPerson } = require('../pipelines/sportsPerson/sportsPersonA
 // curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/confederation_23915
 // curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/association_21914
 // curl -X POST localhost:8080/1-0/aggregate/venues/fifa/5000247
+// curl -X POST localhost:8080/1-0/aggregate/sportspersons/fifa/394503
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
