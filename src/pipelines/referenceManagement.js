@@ -1,25 +1,5 @@
 const _ = require('lodash');
 const { debug, warn } = require('../log');
-const { keySeparator } = require('./constants');
-
-////////////////////////////////////////////////////////////////////////////////
-const collectionNamesAndKeys = {
-	competition: { name: 'competitions', 0: '_externalId', 1: '_externalIdScope' },
-	stage: { name: 'stages', 0: '_externalId', 1: '_externalIdScope' },
-	event: { name: 'events', 0: '_externalId', 1: '_externalIdScope' },
-	sgo: { name: 'sgos', 0: '_externalId', 1: '_externalIdScope' },
-	team: { name: 'teams', 0: '_externalId', 1: '_externalIdScope' },
-	club: { name: 'clubs', 0: '_externalId', 1: '_externalIdScope' },
-	sportsPerson: { name: 'sportsPersons', 0: '_externalId', 1: '_externalIdScope' },
-	venue: { name: 'venues', 0: '_externalId', 1: '_externalIdScope' },
-	keyMoment: { name: 'keyMoments', 0: 'dateTime', 1: '_externalEventId', 2: '_externalEventIdScope', 3: 'type', 4: 'subType' },
-	staff: { name: 'staff', 0: '_externalSportsPersonId', 1: '_externalSportsPersonIdScope' },
-};
-
-////////////////////////////////////////////////////////////////////////////////
-function propStringOrNull(prop) {
-	return prop === null || _.isString(prop);
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 // What are doing?
