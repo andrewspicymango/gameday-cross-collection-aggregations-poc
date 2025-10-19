@@ -6,28 +6,30 @@ const { teamVenueFacet } = require('./teamVenueFacet');
 const { teamStaffFacet } = require('./teamStaffFacet');
 const { teamEventsFacet } = require('./teamEventsFacet');
 const { teamSgoFacet } = require('./teamSgoFacet');
+const { teamRankingsFacet } = require('./teamRankingsFacet');
 const { keySeparator } = require('../constants');
 const { keyInAggregation } = require('../constants');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Builds a MongoDB aggregation pipeline to materialize a team aggregation document.
+ * MongoDB aggregation pipeline for team data processing and materialization.
  *
- * Stages:
- *  - $match: filters documents by _externalId (TEAM_ID) and _externalIdScope (TEAM_SCOPE).
- *  - $facet: runs parallel sub-pipelines producing named facets: meta, clubs, sportsPersons, nations, venues, staff, events.
- *  - $project: extracts first values from meta (resourceType, teamId/_id, scopes), composes externalKey (using keySeparator),
- *      and normalizes each facet output to arrays using $first and $ifNull.
- *  - $addFields: promotes extracted fields to top-level (resourceType, externalKey, gamedayId, _externalId, _externalIdScope)
- *      and stamps lastUpdated with $$NOW (pipeline execution time).
- *  - $merge: persists the resulting document into the materialised aggregations collection
- *      (config.mongo.matAggCollectionName || 'materialisedAggregations'), matching on keyInAggregation,
- *      replacing when matched and inserting when not matched.
+ * Filters team documents by external ID and scope, then uses faceted aggregation
+ * to gather related data from multiple collections (clubs, sports persons, nations,
+ * venues, staff, events, SGOs, rankings). The results are projected into a normalized
+ * format and merged into a materialized aggregations collection.
  *
- * @param {Object} config - Runtime configuration (used to resolve target collection name).
- * @param {string} TEAM_SCOPE - External ID scope used to match the team document.
- * @param {string|number} TEAM_ID - External team identifier to match.
- * @returns {Array<Object>} Aggregation pipeline array suitable for collection.aggregate().
+ * @param {Object} config - Configuration object containing database settings
+ * @param {string} TEAM_SCOPE - External ID scope for team filtering
+ * @param {string} TEAM_ID - External ID for team filtering
+ * @returns {Array} MongoDB aggregation pipeline array with $match, $facet, $project, $addFields, and $merge stages
+ *
+ * Pipeline stages:
+ * 1. $match - Filters by _externalId and _externalIdScope
+ * 2. $facet - Runs parallel sub-aggregations for related data
+ * 3. $project - Normalizes facet outputs and extracts metadata
+ * 4. $addFields - Sets output metadata and timestamps
+ * 5. $merge - Upserts results into materialized aggregations collection
  */
 const pipeline = (config, TEAM_SCOPE, TEAM_ID) => [
 	//////////////////////////////////////////////////////////////////////////////
@@ -46,6 +48,7 @@ const pipeline = (config, TEAM_SCOPE, TEAM_ID) => [
 			staff: teamStaffFacet,
 			events: teamEventsFacet,
 			sgos: teamSgoFacet,
+			rankings: teamRankingsFacet,
 		},
 	},
 
@@ -73,6 +76,8 @@ const pipeline = (config, TEAM_SCOPE, TEAM_ID) => [
 			staffKeys: { $ifNull: [{ $first: '$staff.keys' }, []] },
 			venues: { $ifNull: [{ $first: '$venues.ids' }, []] },
 			venueKeys: { $ifNull: [{ $first: '$venues.keys' }, []] },
+			rankings: { $ifNull: [{ $first: '$rankings.ids' }, []] },
+			rankingKeys: { $ifNull: [{ $first: '$rankings.keys' }, []] },
 		},
 	},
 

@@ -4,6 +4,7 @@ const { eventVenuesFacet } = require('./eventVenuesFacet');
 const { eventTeamsFacet } = require('./eventTeamsFacet');
 const { eventSportsPersonsFacet } = require('./eventSportsPersonsFacet');
 const { eventKeyMomentsFacet } = require('./eventKeyMomentsFacet');
+const { eventRankingsFacet } = require('./eventRankingsFacet');
 const { keySeparator } = require('../constants');
 const { keyInAggregation } = require('../constants');
 
@@ -20,6 +21,7 @@ const pipeline = (config, EVENT_SCOPE, EVENT_ID) => [
 			teams: eventTeamsFacet,
 			sportsPersons: eventSportsPersonsFacet,
 			keyMoments: eventKeyMomentsFacet,
+			rankings: eventRankingsFacet,
 		},
 	},
 	//////////////////////////////////////////////////////////////////////////////
@@ -39,8 +41,10 @@ const pipeline = (config, EVENT_SCOPE, EVENT_ID) => [
 			teamKeys: { $ifNull: [{ $first: '$teams.keys' }, []] },
 			sportsPersons: { $ifNull: [{ $first: '$sportsPersons.ids' }, []] },
 			sportsPersonKeys: { $ifNull: [{ $first: '$sportsPersons.keys' }, []] },
-			keyMoments: { $ifNull: [{ $first: '$keyMoments.keyMomentIds' }, []] },
-			keyMomentKeys: { $ifNull: [{ $first: '$keyMoments.keyMomentKeys' }, []] },
+			keyMoments: { $ifNull: [{ $first: '$keyMoments.ids' }, []] },
+			keyMomentKeys: { $ifNull: [{ $first: '$keyMoments.keys' }, []] },
+			rankings: { $ifNull: [{ $first: '$rankings.ids' }, []] },
+			rankingKeys: { $ifNull: [{ $first: '$rankings.keys' }, []] },
 		},
 	},
 	{

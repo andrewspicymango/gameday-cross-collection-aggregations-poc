@@ -1,4 +1,4 @@
-const { keySeparator, clubSeparator, teamSeparator, nationSeparator } = require('../constants.js');
+const { keySeparator } = require('../constants.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 const sportsPersonKeyMomentFacet = () => {

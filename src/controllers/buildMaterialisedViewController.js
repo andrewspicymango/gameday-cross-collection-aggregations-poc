@@ -19,6 +19,8 @@ const { processStaff } = require('../pipelines/staff/staffAggregationBuild.js');
 const { processVenue } = require('../pipelines/venue/venueAggregationBuild.js');
 const { processKeyMoment } = require('../pipelines/keyMoment/keyMomentAggregationBuild.js');
 const { processSportsPerson } = require('../pipelines/sportsPerson/sportsPersonAggregationBuild.js');
+const { processRanking } = require('../pipelines/ranking/rankingAggregationBuild.js');
+const { RankingKeyClass } = require('../pipelines/ranking/rankingKeyClass');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -49,6 +51,7 @@ const { processSportsPerson } = require('../pipelines/sportsPerson/sportsPersonA
 // curl -X POST localhost:8080/1-0/aggregate/sgos/fifa/association_21914
 // curl -X POST localhost:8080/1-0/aggregate/venues/fifa/5000247
 // curl -X POST localhost:8080/1-0/aggregate/sportspersons/fifa/394503
+// curl -X POST localhost:8080/1-0/aggregate/rankings/stage/fifa/285065/team/fifa/255711_43960/latest/1
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -380,8 +383,87 @@ async function buildMaterialisedViewControllerForKeyMoment(req, res) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// router.post('/aggregate/ranking/:lType/:lIdScope/:lId/:pType/:pIdScope/:pId/:dateTimeLabel/:ranking', buildMaterialisedViewControllerForRanking);
+async function buildMaterialisedViewControllerForRanking(req, res) {
+	const id = uuid.v4();
+	debug(`${req.method} ${req.url}${req.hostname != undefined ? ' [called from ' + req.hostname + ']' : ''}`, id);
+	const lType = req.params.lType;
+	const lIdScope = req.params.lIdScope;
+	const lId = req.params.lId;
+	const pType = req.params.pType;
+	const pIdScope = req.params.pIdScope;
+	const pId = req.params.pId;
+	const dateTimeLabel = req.params.dateTimeLabel;
+	const mongo = config?.mongo;
+	if (lType !== 'stage' && lType !== 'event') {
+		send400(res, `Invalid lType parameter: ${lType}. Must be 'stage' or 'event'.`);
+		return;
+	}
+	if (pType !== 'team' && pType !== 'sportsperson') {
+		send400(res, `Invalid pType parameter: ${pType}. Must be 'team' or 'sportsperson'.`);
+		return;
+	}
+	if (!_.isString(dateTimeLabel) || dateTimeLabel.length === 0) {
+		send400(res, `Invalid dateTimeLabel parameter: ${req.params.dateTimeLabel}. Must be a non-empty string.`);
+		return;
+	}
+	const ranking = Number(req.params.ranking);
+	if (Number.isNaN(ranking)) {
+		send400(res, `Invalid ranking parameter: ${req.params.ranking}. Must be a valid number.`);
+		return;
+	}
+
+	//////////////////////////////////////////////////////////////////////////////
+	if (!mongo || !mongo.db || !mongo.client) {
+		warn(`No MongoDB connection available`, 'WD0050', 500, 'Database Connection Error');
+		send400(res, {
+			message: 'Database connection is not available.',
+			errorCode: 'WD0050', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+			category: 'Database Connection Error',
+		});
+		return;
+	}
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Create a ranking key object
+	const rankingKey = new RankingKeyClass({
+		stageId: lType === 'stage' ? lId : null,
+		stageIdScope: lType === 'stage' ? lIdScope : null,
+		eventId: lType === 'event' ? lId : null,
+		eventIdScope: lType === 'event' ? lIdScope : null,
+		teamId: pType === 'team' ? pId : null,
+		teamIdScope: pType === 'team' ? pIdScope : null,
+		sportsPersonId: pType === 'sportsperson' ? pId : null,
+		sportsPersonIdScope: pType === 'sportsperson' ? pIdScope : null,
+		dateTimeLabel: dateTimeLabel,
+		ranking: ranking,
+	});
+
+	const report = `Creating materialised aggregation view of single sports data for schemaType: ranking (${rankingKey.report()})`;
+	info(report, id);
+
+	//////////////////////////////////////////////////////////////////////////////
+	try {
+		const response = await processRanking(config, mongo, rankingKey, id);
+		////////////////////////////////////////////////////////////////////////////
+		// Return the result
+		const body = {
+			status: 200,
+			service: config?.serviceName,
+			message: `Materialised aggregation views created for ranking resource - ${rankingKey.report()}`,
+			response,
+		};
+		send200(res, body, config);
+	} catch (err) {
+		send500(res, err.message);
+		return;
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
 module.exports = {
 	buildMaterialisedViewControllerForIdScopeResources,
 	buildMaterialisedViewControllerForStaff,
 	buildMaterialisedViewControllerForKeyMoment,
+	buildMaterialisedViewControllerForRanking,
 };

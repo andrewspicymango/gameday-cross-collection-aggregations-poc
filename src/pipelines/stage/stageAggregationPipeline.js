@@ -1,6 +1,7 @@
 const { stageMetaFacet } = require('./stageMetaFacet');
 const { stageEventsFacet } = require('./stageEventsFacet');
 const { stageCompetitionFacet } = require('./stageCompetitionFacet');
+const { stageRankingsFacet } = require('./stageRankingsFacet');
 const { keySeparator } = require('../constants');
 const { keyInAggregation } = require('../constants');
 
@@ -40,6 +41,7 @@ const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 			meta: stageMetaFacet,
 			competitions: stageCompetitionFacet,
 			events: stageEventsFacet,
+			rankings: stageRankingsFacet,
 		},
 	},
 
@@ -64,6 +66,12 @@ const pipeline = (config, STAGE_SCOPE, STAGE_ID) => [
 			},
 			eventKeys: {
 				$ifNull: [{ $first: '$events.keys' }, []],
+			},
+			rankings: {
+				$ifNull: [{ $first: '$rankings.ids' }, []],
+			},
+			rankingKeys: {
+				$ifNull: [{ $first: '$rankings.keys' }, []],
 			},
 		},
 	},
