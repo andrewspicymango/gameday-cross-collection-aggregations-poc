@@ -16,9 +16,9 @@
 		{
 			"type": "node",
 			"request": "launch",
-			"name": "node src/pipelines/pipelineBuilder.js",
+			"name": "node src/pipelines/clientAggregationPipelineBuilderTester.js",
 			"skipFiles": ["<node_internals>/**"],
-			"program": "${workspaceFolder}/src/pipelines/pipelineBuilder.js",
+			"program": "${workspaceFolder}/src/pipelines/clientAggregationPipelineBuilderTester.js",
 			"outFiles": ["${workspaceFolder}/**/*.js"],
 			"args": []
 		},

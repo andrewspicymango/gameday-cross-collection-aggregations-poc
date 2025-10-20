@@ -1,94 +1,80 @@
 ////////////////////////////////////////////////////////////////////////////////
+// Constants & config
+////////////////////////////////////////////////////////////////////////////////
 const idField = 'gamedayId';
 const aggregationCollectionName = 'materialisedAggregations';
 
-////////////////////////////////////////////////////////////////////////////////
-// {
-//  // Exclude specific fields by setting them to 0
-//  fieldToExclude1: 0,
-//  fieldToExclude2: 0,
-//  // Or include only specific fields by setting them to 1
-//  // _id: 1,
-//  // fieldToInclude1: 1,
-//  // fieldToInclude2: 1
-// },
+// Fields to hide when materialising final resources
 const fieldsToExcludeFromMaterialisedResources = {
 	_stickies: 0,
 	_original: 0,
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-// Example: From a COMPETITION → fetch EVENTS + TEAMS + SGOS
-const pipeline = buildMaterialisedListsPipelineTotalMax({
-	rootType: 'competition',
-	rootExternalKey: '289175 @ fifa',
-	targetTypes: ['sgo', 'team', 'event'],
-	totalMax: 4,
-});
-console.log(JSON.stringify(pipeline));
-
+// API (explicit routes only, strict parsing + cycle & duplicate-edge detection)
 ////////////////////////////////////////////////////////////////////////////////
-// materialiser.totalMax.resources.js
-// Optimised totalMax multi-target materialiser:
-// - Traverse *materialisedAggregations* once to compute ID sets (shared hops)
-// - Materialise documents from the correct resource collections (e.g., 'stages', 'events', 'teams')
-// - Apply a single totalMax budget across root + target types in the caller-specified order
-
-////////////////////////////////////////////////////////////////////////////////
-/**
- * Builds a MongoDB aggregation pipeline for materializing related resources within a total document budget.
- *
- * This function creates an optimized pipeline that traverses the materialized aggregations collection
- * to find related resources, then materializes the actual documents from their source collections.
- * It uses a shared-hop approach to minimize duplicate traversals and applies a total budget constraint
- * across all resource types in the specified order.
- *
- * Process flow:
- * 1. Validates input parameters and resource type mappings
- * 2. Computes shortest paths from root to each target type using graph traversal
- * 3. Plans shared traversal steps to eliminate duplicate lookups
- * 4. Builds aggregation stages that traverse materialized aggregations to collect IDs
- * 5. Applies budget allocation (root first, then targets in specified order)
- * 6. Materializes documents from actual resource collections via $facet operations
- * 7. Structures final output with included items and overflow tracking
- *
- * The budget is consumed sequentially: root document takes 1 slot (if budget > 0), then
- * each target type consumes up to its available documents within the remaining budget.
- * Documents exceeding the budget are tracked in overflow arrays for pagination purposes.
- *
- * @param {Object} params - Configuration object
- * @param {string} params.rootType - Resource type to start traversal from
- * @param {string} params.rootExternalKey - External key identifying the root resource
- * @param {string[]} params.targetTypes - Target resource types to materialize (order affects budget allocation)
- * @param {number} params.totalMax - Maximum total documents to materialize across all types
- * @param {Object} [params.edges] - Custom graph edges mapping (defaults to built-in resource relationships)
- * @param {Object} [params.collectionMap] - Custom resource type to collection name mapping
- * @returns {import('mongodb').Document[]} MongoDB aggregation pipeline stages
- * @throws {Error} If required parameters are missing, invalid, or no path exists between types
- */
-function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, targetTypes, totalMax, edges, collectionMap }) {
+function buildMaterialisedListsPipelineTotalMax({
+	rootType,
+	rootExternalKey,
+	totalMax,
+	routes, // [{ key, to, via: ["from.field->to", ...] }, ...]  REQUIRED
+	includeTypes, // ["team", "venue", ...] REQUIRED (controls materialisation + budget order)
+	edges,
+	collectionMap,
+}) {
+	//////////////////////////////////////////////////////////////////////////////
+	// Validation
 	if (!rootType || !rootExternalKey) throw new Error('rootType and rootExternalKey are required');
-	if (!Array.isArray(targetTypes) || targetTypes.length === 0) throw new Error('targetTypes must be a non-empty array');
-	if (!Number.isInteger(totalMax) || totalMax < 0) throw new Error('totalMax must be a non-negative integer');
+	if (!Array.isArray(routes) || routes.length === 0) {
+		throw new Error('routes must be a non-empty array of explicit routes.');
+	}
+	if (!Array.isArray(includeTypes) || includeTypes.length === 0) {
+		throw new Error('includeTypes must be a non-empty array of types to materialise.');
+	}
+	if (!Number.isInteger(totalMax) || totalMax < 0) {
+		throw new Error('totalMax must be a non-negative integer');
+	}
 
 	//////////////////////////////////////////////////////////////////////////////
-	// Normalise the array, removing second or further instances of the same string in the array
-	targetTypes = [...new Set(targetTypes)];
+	// Normalise includeTypes order & uniqueness (budget is applied in this order)
+	includeTypes = [...new Set(includeTypes)];
 
-	////////////////////////////////////////////////////////////////////////////////
-	// Directed, field-labeled graph of materialised edges (extend as your views evolve)
+	//////////////////////////////////////////////////////////////////////////////
+	// Directed, field-labelled graph
 	const EDGES = edges || {
 		competition: { stages: 'stage', sgos: 'sgo' },
-		stage: { events: 'event', competitions: 'competition' },
-		event: { teams: 'team', venues: 'venue', sportsPersons: 'sportsPerson', stages: 'stage' },
-		team: { clubs: 'club', events: 'event', nations: 'nation' },
-		venue: { events: 'event' },
-		club: { teams: 'team' },
-		sgo: { competitions: 'competition' },
-		nation: { teams: 'team' },
+		stage: { events: 'event', competitions: 'competition', rankings: 'ranking' },
+		event: {
+			teams: 'team',
+			venues: 'venue',
+			sportsPersons: 'sportsPerson',
+			stages: 'stage',
+			rankings: 'ranking',
+			keyMoments: 'keyMoment',
+		},
+		team: {
+			clubs: 'club',
+			events: 'event',
+			nations: 'nation',
+			sportsPersons: 'sportsPerson',
+			staff: 'staff',
+			rankings: 'ranking',
+			sgos: 'sgo',
+			keyMoments: 'keyMoment',
+			venues: 'venue',
+		},
+		venue: { events: 'event', teams: 'team', sgos: 'sgo', clubs: 'club', nations: 'nation' },
+		club: { teams: 'team', sgos: 'sgo', venues: 'venue', sportsPersons: 'sportsPerson', staff: 'staff' },
+		sgo: { competitions: 'competition', sgos: 'sgo', venues: 'venue', clubs: 'club', nations: 'nation', teams: 'team' },
+		nation: { teams: 'team', sgos: 'sgo', venues: 'venue', staff: 'staff' },
+		staff: { sportsPersons: 'sportsPerson', teams: 'team', clubs: 'club', nations: 'nation' },
+		sportsPerson: { teams: 'team', clubs: 'club', events: 'event', staff: 'staff', rankings: 'ranking', keyMoments: 'keyMoment' },
+		rankings: { events: 'event', stages: 'stage', teams: 'team', sportsPersons: 'sportsPerson' },
+		keyMoments: { events: 'event', sportsPersons: 'sportsPerson', teams: 'team' },
 	};
-	////////////////////////////////////////////////////////////////////////////////
-	// resourceType -> resource collection name (for final materialisation lookups)
+
+	//////////////////////////////////////////////////////////////////////////////
+	// resourceType -> real collection (for final materialisation)
 	const COLLECTIONS = collectionMap || {
 		competition: 'competitions',
 		stage: 'stages',
@@ -99,49 +85,53 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 		sgo: 'sgos',
 		nation: 'nations',
 		sportsPerson: 'sportsPersons',
+		staff: 'staff',
+		ranking: 'rankings',
+		keyMoment: 'keyMoments',
 	};
+
 	//////////////////////////////////////////////////////////////////////////////
-	// Validate that we can materialise all requested types (root + targets)
-	const allTypes = new Set([rootType, ...targetTypes]);
-	for (const t of allTypes) {
+	// Validate that we can materialise root + requested include types
+	const allToMaterialise = new Set([rootType, ...includeTypes]);
+	for (const t of allToMaterialise) {
 		if (!COLLECTIONS[t]) {
 			throw new Error(`No collection mapping for resourceType='${t}'. Provide 'collectionMap' or extend defaults.`);
 		}
 	}
-	//////////////////////////////////////////////////////////////////////////////
-	// 1) Compute shortest hop paths from root → each target
-	const pathsByTarget = {};
-	for (const t of targetTypes) {
-		const p = findPath(EDGES, rootType, t);
-		if (p === null) throw new Error(`No materialised path from '${rootType}' to '${t}'. Add an edge if it should exist.`);
-		pathsByTarget[t] = p; // [] => root == target
-	}
 
 	//////////////////////////////////////////////////////////////////////////////
-	// 2) Merge paths into unique traversal steps (shared hops computed once)
-	const steps = planSteps(Object.values(pathsByTarget));
+	// Parse routes strictly (throws on any non-contiguous / invalid hop, cycles, or duplicate edges)
+	const parsedRoutes = routes.map((r) => ({
+		key: r.key,
+		to: r.to,
+		path: parseExplicitRouteStrictNoCyclesNoDup({ EDGES, rootType, route: r }),
+	}));
 
 	//////////////////////////////////////////////////////////////////////////////
-	// 3) Build pipeline (traverse in *materialisedAggregations*)
-	const stages = [
-		{ $match: { resourceType: rootType, externalKey: rootExternalKey } },
-		{ $addFields: { _rootKey: '$externalKey' } },
-		// expose the root's own id as an array for uniform budget handling later
-		{ $addFields: { _rootIds: [`$${idField}`] } },
-	];
+	// Shared-hop planning (dedupe common traversals across routes)
+	const steps = planSteps(parsedRoutes.map((r) => r.path));
 
+	//////////////////////////////////////////////////////////////////////////////
+	// Build the aggregation pipeline
+	const stages = [{ $match: { resourceType: rootType, externalKey: rootExternalKey } }, { $addFields: { _rootKey: '$externalKey', _rootIds: [`$${idField}`] } }];
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Traverse materialisedAggregations using planned steps
 	for (const step of steps) {
 		const { from, field, dependsOnKey, outputName, depth } = step;
 
+		////////////////////////////////////////////////////////////////////////////
+		// First hop reads from the root doc field
 		if (depth === 0) {
-			// First hop: read array directly from the root doc
 			stages.push({ $addFields: { [outputName]: { $ifNull: [`$${field}`, []] } } });
-		} else {
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// Subsequent hops read from previous step's output
+		else {
 			const prev = steps.find((s) => s.key === dependsOnKey);
 			if (!prev) throw new Error(`Internal: missing dependency for step ${step.key}`);
 			const prevOutput = prev.outputName;
 			const lkField = `${outputName}__lk`;
-
 			stages.push({
 				$lookup: {
 					from: aggregationCollectionName,
@@ -156,62 +146,72 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 					as: lkField,
 				},
 			});
-			stages.push({ $addFields: { [outputName]: { $ifNull: [{ $arrayElemAt: [`$${lkField}.ids`, 0] }, []] } } });
+			stages.push({
+				$addFields: {
+					[outputName]: { $ifNull: [{ $arrayElemAt: [`$${lkField}.ids`, 0] }, []] },
+				},
+			});
+		}
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	// For each route, compute its final array of IDs (from the last hop output)
+	for (const r of parsedRoutes) {
+		const idsVar = `_route_${safeVar(r.key)}_ids`;
+		const sourceFieldExpr =
+			r.path.length === 0
+				? '$_rootIds'
+				: (() => {
+						const lastHop = r.path[r.path.length - 1];
+						const lastKey = makeKey(lastHop.from, lastHop.field, lastHop.to);
+						const lastStep = steps.find((s) => s.key === lastKey);
+						if (!lastStep) throw new Error(`Internal: cannot find step for route '${r.key}'`);
+						return `$${lastStep.outputName}`;
+				  })();
+		stages.push({ $addFields: { [idsVar]: sourceFieldExpr } });
+	}
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Union per included type (normalised sets across all routes with the same .to)
+	for (const t of includeTypes) {
+		const contributingVars = parsedRoutes.filter((r) => r.to === t).map((r) => `$_route_${safeVar(r.key)}_ids`);
+		const unionVar = `_union_${t}_ids`;
+		if (contributingVars.length === 0) {
+			stages.push({ $addFields: { [unionVar]: [] } });
+		} else if (contributingVars.length === 1) {
+			stages.push({ $addFields: { [unionVar]: contributingVars[0] } });
+		} else {
+			const unionExpr = contributingVars.reduce((acc, cur) => {
+				if (acc === null) return cur;
+				return { $setUnion: [acc, cur] };
+			}, null);
+			stages.push({ $addFields: { [unionVar]: unionExpr } });
 		}
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
-	// 4) Budget allocation (root first, then in the order of targetTypes)
+	// Budget: root first, then includeTypes in given order
 	stages.push({ $addFields: { _remaining: totalMax } });
-
 	//////////////////////////////////////////////////////////////////////////////
-	// Root allocation (counts as 1 if budget > 0)
 	stages.push({
 		$addFields: {
-			_rootIncludedIds: {
-				$cond: [{ $gt: ['$_remaining', 0] }, { $slice: ['$_rootIds', 1] }, []],
-			},
-			_rootOverflowIds: {
-				$cond: [{ $gt: ['$_remaining', 0] }, { $slice: ['$_rootIds', 0] }, '$_rootIds'],
-			},
-			_remaining: {
-				$cond: [{ $gt: ['$_remaining', 0] }, { $subtract: ['$_remaining', 1] }, '$_remaining'],
-			},
+			_rootIncludedIds: { $cond: [{ $gt: ['$_remaining', 0] }, { $slice: ['$_rootIds', 1] }, []] },
+			_rootOverflowIds: { $cond: [{ $gt: ['$_remaining', 0] }, { $slice: ['$_rootIds', 0] }, '$_rootIds'] },
+			_remaining: { $cond: [{ $gt: ['$_remaining', 0] }, { $subtract: ['$_remaining', 1] }, '$_remaining'] },
 		},
 	});
 
 	//////////////////////////////////////////////////////////////////////////////
-	// For each target, attach its final ID set and consume budget
-	const finalArrayFieldByType = {};
-	for (const t of targetTypes) {
-		const path = pathsByTarget[t];
-		let sourceFieldExpr;
-		if (path.length === 0) {
-			sourceFieldExpr = '$_rootIds';
-		} else {
-			const lastHop = path[path.length - 1];
-			const lastKey = makeKey(lastHop.from, lastHop.field, lastHop.to);
-			const lastStep = steps.find((s) => s.key === lastKey);
-			if (!lastStep) throw new Error(`Internal: cannot find step for '${t}'`);
-			sourceFieldExpr = `$${lastStep.outputName}`;
-		}
-
-		const idsVar = `_src_${t}_ids`;
-		finalArrayFieldByType[t] = idsVar;
-
-		stages.push({ $addFields: { [idsVar]: sourceFieldExpr } });
-
+	// For each included type: slice from its union set, track overflow, decrement remaining
+	for (const t of includeTypes) {
+		const idsVar = `_union_${t}_ids`;
 		const includedVar = `_inc_${t}_ids`;
 		const overflowVar = `_ovf_${t}_ids`;
-
 		stages.push({
 			$addFields: {
 				[includedVar]: {
 					$let: {
 						vars: { sz: { $size: `$${idsVar}` } },
-						in: {
-							$cond: [{ $gt: ['$_remaining', 0] }, { $slice: [`$${idsVar}`, { $min: ['$_remaining', '$$sz'] }] }, []],
-						},
+						in: { $cond: [{ $gt: ['$_remaining', 0] }, { $slice: [`$${idsVar}`, { $min: ['$_remaining', '$$sz'] }] }, []] },
 					},
 				},
 				[overflowVar]: {
@@ -224,11 +224,7 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 									arraySize: { $size: `$${idsVar}` },
 								},
 								in: {
-									$cond: [
-										{ $eq: ['$$take', '$$arraySize'] },
-										[], // If we're taking everything, overflow is empty
-										{ $slice: [`$${idsVar}`, '$$take', { $subtract: ['$$arraySize', '$$take'] }] },
-									],
+									$cond: [{ $eq: ['$$take', '$$arraySize'] }, [], { $slice: [`$${idsVar}`, '$$take', { $subtract: ['$$arraySize', '$$take'] }] }],
 								},
 							},
 						},
@@ -246,29 +242,18 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
-	// 5) Materialise from *resource* collections via $facet
-	const sortStageFor = (type) => {
-		return [{ $sort: { _id: 1 } }];
-	};
-
+	// Materialise via $facet: root + one facet per included type
+	const sortStageFor = (type) => [{ $sort: { _id: 1 } }];
 	const facet = {};
-
 	//////////////////////////////////////////////////////////////////////////////
-	// Root facet (materialise the single root doc from its resource collection)
+	// Root facet
 	facet[rootType] = [
 		{ $project: { includedIds: '$_rootIncludedIds', overflowIds: '$_rootOverflowIds' } },
 		{
 			$lookup: {
 				from: COLLECTIONS[rootType],
 				let: { ids: '$includedIds' },
-				pipeline: [
-					{ $match: { $expr: { $in: [`$_id`, '$$ids'] } } },
-					...sortStageFor(rootType),
-					,
-					{
-						$project: fieldsToExcludeFromMaterialisedResources,
-					},
-				],
+				pipeline: [{ $match: { $expr: { $in: ['$_id', '$$ids'] } } }, ...sortStageFor(rootType), { $project: fieldsToExcludeFromMaterialisedResources }],
 				as: 'docs',
 			},
 		},
@@ -276,101 +261,127 @@ function buildMaterialisedListsPipelineTotalMax({ rootType, rootExternalKey, tar
 	];
 
 	//////////////////////////////////////////////////////////////////////////////
-	// Target type facets
-	for (const t of targetTypes) {
+	// Included types facets
+	for (const t of includeTypes) {
 		const includedVar = `_inc_${t}_ids`;
 		const overflowVar = `_ovf_${t}_ids`;
-
 		facet[t] = [
 			{ $project: { includedIds: `$${includedVar}`, overflowIds: `$${overflowVar}` } },
 			{
 				$lookup: {
-					from: COLLECTIONS[t], // <-- materialise from the real resource collection
+					from: COLLECTIONS[t],
 					let: { ids: '$includedIds' },
-					pipeline: [
-						{ $match: { $expr: { $in: [`$_id`, '$$ids'] } } },
-						...sortStageFor(t),
-						{
-							$project: fieldsToExcludeFromMaterialisedResources,
-						},
-					],
+					pipeline: [{ $match: { $expr: { $in: ['$_id', '$$ids'] } } }, ...sortStageFor(t), { $project: fieldsToExcludeFromMaterialisedResources }],
 					as: 'docs',
 				},
 			},
 			{ $replaceWith: { items: '$docs', overflow: { resourceType: t, overflowIds: '$overflowIds' } } },
 		];
 	}
-
-	stages.push({ $facet: facet });
-
 	//////////////////////////////////////////////////////////////////////////////
-	// 6) Final shape
+	stages.push({ $facet: facet });
+	//////////////////////////////////////////////////////////////////////////////
+	// Final shape
 	const resultsProjection = {};
-	for (const t of allTypes) {
+	for (const t of includeTypes) {
 		resultsProjection[t] = {
 			$ifNull: [{ $arrayElemAt: [`$${t}`, 0] }, { items: [], overflow: { resourceType: t, overflowIds: [] } }],
 		};
 	}
-
 	stages.push({
 		$project: {
 			root: { type: { $literal: rootType }, externalKey: '$_rootKey' },
 			results: resultsProjection,
 		},
 	});
-
+	//////////////////////////////////////////////////////////////////////////////
 	return stages;
 }
 
-//////////////////////////////////////////////////////////////////////////////
-// Helper Graph Functions
+////////////////////////////////////////////////////////////////////////////////
+// Helpers
 ////////////////////////////////////////////////////////////////////////////////
 
-//////////////////////////////////////////////////////////////////////////////
-/**
- * Finds the shortest path between two resource types in the materialized aggregations graph.
- *
- * Uses breadth-first search to traverse the directed graph of resource relationships,
- * returning the sequence of hops (edges) needed to navigate from start to end type.
- * Each hop contains the source type, field name, and destination type information.
- *
- * @param {Object} EDGES - Graph adjacency list mapping resource types to their outbound connections
- * @param {string} startType - Source resource type to begin traversal
- * @param {string} endType - Target resource type to reach
- * @returns {Array|null} Array of hop objects [{from, field, to}] or null if no path exists
- */
-function findPath(EDGES, startType, endType) {
-	if (startType === endType) return [];
-	const queue = [[startType, []]];
-	const visited = new Set([startType]);
-
-	while (queue.length) {
-		const [cur, path] = queue.shift();
-		const outs = EDGES[cur] || {};
-		for (const [field, to] of Object.entries(outs)) {
-			const hop = { from: cur, field, to };
-			const nextPath = [...path, hop];
-			if (to === endType) return nextPath;
-			if (!visited.has(to)) {
-				visited.add(to);
-				queue.push([to, nextPath]);
-			}
-		}
+// STRICT + CYCLE + DUPLICATE-EDGE-DETECTING parser for explicit routes.
+// Rules:
+//  - First hop's `from` must equal rootType.
+//  - Each next hop's `from` must equal the previous hop's `to` (contiguous).
+//  - Edge must exist in EDGES[from] and match declared `to`.
+//  - No cycles: may not revisit any previously reached node within the same route.
+//  - No duplicate edges: the same '<from>.<field>-><to>' may not appear twice in a route.
+//  - Final node must equal route.to.
+// Throws detailed errors describing exactly which hop failed and why.
+function parseExplicitRouteStrictNoCyclesNoDup({ EDGES, rootType, route }) {
+	//////////////////////////////////////////////////////////////////////////////
+	// Validation
+	if (!route || !route.key || !route.to || !Array.isArray(route.via) || route.via.length === 0) {
+		throw new Error(`Invalid route: expected { key, to, via[] }. Got: ${JSON.stringify(route)}`);
 	}
-	return null;
+	//////////////////////////////////////////////////////////////////////////////
+	const path = [];
+	let expectedFrom = rootType;
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Track visited nodes to prevent cycles (includes root)
+	const visitedNodes = new Set([rootType]);
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Track visited edges to prevent duplicates
+	const visitedEdges = new Set();
+
+	//////////////////////////////////////////////////////////////////////////////
+	route.via.forEach((edgeKey, idx) => {
+		const label = `route '${route.key}', hop ${idx + 1}`;
+		const [fromAndField, to] = String(edgeKey).split('->');
+		if (!fromAndField || !to) throw new Error(`${label}: bad edge identifier '${edgeKey}' (expected '<from>.<field>-><to>')`);
+		const dot = fromAndField.indexOf('.');
+		if (dot <= 0) throw new Error(`${label}: bad edge identifier '${edgeKey}' (missing '.')`);
+		const from = fromAndField.slice(0, dot);
+		const field = fromAndField.slice(dot + 1);
+		////////////////////////////////////////////////////////////////////////////
+		// Contiguity check
+		if (from !== expectedFrom) {
+			throw new Error(`${label}: non-contiguous hop. Expected 'from'='${expectedFrom}' but got '${from}'. ` + `Routes must be linear (no branching/backtracking).`);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// Graph existence check
+		const outs = EDGES[from];
+		if (!outs) throw new Error(`${label}: no edges declared for type '${from}' in EDGES.`);
+		const declaredTo = outs[field];
+		if (!declaredTo) throw new Error(`${label}: field '${field}' not declared on EDGES['${from}'].`);
+		if (declaredTo !== to) {
+			throw new Error(`${label}: edge targets '${declaredTo}', but route specified '${to}'.`);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// Duplicate-edge detection
+		if (visitedEdges.has(edgeKey)) {
+			throw new Error(`${label}: duplicate edge '${edgeKey}' detected within the same route.`);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// Cycle detection: cannot revisit a node we've already reached on this route
+		if (visitedNodes.has(to)) {
+			const trail = [rootType, ...path.map((h) => h.to)].join(' -> ');
+			throw new Error(`${label}: cycle detected when moving '${from}' -> '${to}'. ` + `Node '${to}' was already visited in this route (${trail}).`);
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// Append hop
+		path.push({ from, field, to });
+		visitedNodes.add(to);
+		visitedEdges.add(edgeKey);
+		expectedFrom = to;
+	});
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Final node check
+	if (expectedFrom !== route.to) {
+		throw new Error(`route '${route.key}': final node '${expectedFrom}' does not match declared 'to'='${route.to}'.`);
+	}
+
+	return path;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/**
- * Consolidates multiple traversal paths into optimized execution steps with shared hop elimination.
- *
- * Analyzes all paths to identify common traversal segments, creating a minimal set of pipeline
- * steps where shared hops are computed only once. Each step tracks its dependencies and depth
- * to enable correct pipeline stage ordering and field referencing.
- *
- * @param {Array[]} paths - Array of path arrays, where each path contains hop objects
- * @returns {Array} Sorted array of step objects with key, dependency info, and output field names
- */
+// Consolidate multiple paths into unique steps (shared-hop elimination)
 function planSteps(paths) {
 	const seen = new Map();
 	const steps = [];
@@ -380,7 +391,6 @@ function planSteps(paths) {
 			const hop = path[i];
 			const key = makeKey(hop.from, hop.field, hop.to);
 			const dependsOnKey = i > 0 ? makeKey(path[i - 1].from, path[i - 1].field, path[i - 1].to) : null;
-
 			if (!seen.has(key)) {
 				const outputName = `${hop.to}Ids__${hashKey(key)}__d${i}`;
 				const step = { key, from: hop.from, field: hop.field, to: hop.to, depth: i, dependsOnKey, outputName };
@@ -394,34 +404,13 @@ function planSteps(paths) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/**
- * Creates a unique identifier string for a graph traversal hop.
- *
- * @param {string} from - Source resource type
- * @param {string} field - Field name containing the relationship
- * @param {string} to - Destination resource type
- * @returns {string} Formatted key string for the hop
- */
+// Hop key helper
 function makeKey(from, field, to) {
 	return `${from}.${field}->${to}`;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/**
- * Generates a hash key from a string using the djb2 hash algorithm with XOR variant.
- *
- * This function implements a fast, non-cryptographic hash function that converts
- * a string into a compact alphanumeric identifier. The algorithm uses bit shifting
- * and XOR operations to produce a deterministic hash value, then converts it to
- * base-36 representation for a shorter string output.
- *
- * @param {string} s - The input string to hash
- * @returns {string} A base-36 encoded hash key derived from the input string
- *
- * @example
- * hashKey("hello world") // Returns something like "9jqo5u"
- * hashKey("test") // Returns something like "2741c"
- */
+// Non-crypto small hash for stable field names
 function hashKey(s) {
 	let h = 5381;
 	for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
@@ -429,10 +418,10 @@ function hashKey(s) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = {
-	buildMaterialisedListsPipelineTotalMax,
-	findPath,
-	planSteps,
-	makeKey,
-	hashKey,
-};
+// Safe variable label
+function safeVar(s) {
+	return String(s).replace(/[^\w]/g, '_');
+}
+
+////////////////////////////////////////////////////////////////////////////////
+module.exports = { buildMaterialisedListsPipelineTotalMax };
