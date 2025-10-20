@@ -13,8 +13,24 @@ const { buildOperationsForReferenceChange } = require('../referenceManagement');
 const { executeOperationsForReferenceChange } = require('../referenceManagement');
 
 ////////////////////////////////////////////////////////////////////////////////
-// Process competition updates
-async function processCompetition(config, mongo, competitionIdScope, competitionId, requestId) {
+/**
+ * Processes a competition by building and updating its aggregation document.
+ * Validates the competition exists, runs an aggregation pipeline, and handles
+ * reference updates for related entities.
+ *
+ * @async
+ * @function processCompetition
+ * @param {Object} config - Configuration object containing MongoDB settings
+ * @param {string} config.mongo.matAggCollectionName - Name of materialized aggregation collection
+ * @param {Object} mongo - MongoDB connection object with db property
+ * @param {string} competitionIdScope - External ID scope for the competition
+ * @param {string} competitionId - External ID of the competition to process
+ * @param {string} requestId - Unique identifier for tracking this request
+ * @param {boolean} [updatedReferences=true] - Whether to update outbound references
+ * @returns {Promise<Object|number|null>} The new aggregation document, 404 if competition not found, or null on failure
+ * @throws {Error} When config.mongo.matAggCollectionName is invalid or required parameters are missing
+ */
+async function processCompetition(config, mongo, competitionIdScope, competitionId, requestId, updatedReferences = true) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!competitionId || !competitionIdScope) throw new Error('Invalid parameters: competitionId and competitionIdScope are required');
 	//////////////////////////////////////////////////////////////////////////////
@@ -42,12 +58,15 @@ async function processCompetition(config, mongo, competitionIdScope, competition
 	// Retrieve the new version of the competition aggregation and calculate new competition keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(competitionAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	if (_.isObject(newAggregationDoc)) {
-		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
-	} else {
+	if (!_.isObject(newAggregationDoc)) {
 		warn(`Failed to build new aggregation document`, requestId);
 		return null;
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	// Compare old and new aggregation documents to determine if references need to be updated
+	if (updatedReferences === true) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
 	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;

@@ -11,37 +11,29 @@ const { buildOperationsForReferenceChange } = require('../referenceManagement');
 const { executeOperationsForReferenceChange } = require('../referenceManagement');
 
 ////////////////////////////////////////////////////////////////////////////////
-// Process club updates
 /**
- * Builds or rebuilds club aggregation documents and synchronizes cross-references.
- *
- * This function performs a complete aggregation build for a club, capturing all
- * related resources (SGOs, teams, venues) and maintaining referential integrity
- * across the materialized aggregation collection.
- *
- * Process flow:
- * 1. Validates club existence to avoid expensive pipeline execution on missing data
- * 2. Captures current aggregation state (old keys) before rebuilding
- * 3. Executes aggregation pipeline to rebuild club materialized view
- * 4. Compares old vs new keys to identify relationship changes
- * 5. Updates cross-references in related resource aggregations:
- *    - SGO aggregations (add/remove club reference for SGO membership changes)
- *    - Team aggregations (add/remove club reference for team membership changes)
- *    - Venue aggregations (add/remove club reference for venue membership changes)
- *
- * The function ensures that when a club changes its SGO/team/venue associations,
- * all affected aggregation documents are updated to maintain consistency.
+ * Processes a club aggregation by building and updating materialized aggregation data.
  *
  * @async
- * @param {Object} config - Configuration containing mongo.matAggCollectionName
- * @param {Object} mongo - MongoDB connection with db.collection access
- * @param {string} clubIdScope - External scope identifier for the club
- * @param {string} clubId - External identifier for the club
- * @param {string} requestId - Unique identifier for request tracking/logging
- * @returns {Promise<Object|number>} New aggregation document or 404 if club not found
- * @throws {Error} If configuration is invalid or required parameters are missing
+ * @function processClub
+ * @param {Object} config - Configuration object containing MongoDB settings
+ * @param {string} config.mongo.matAggCollectionName - Name of the materialized aggregation collection
+ * @param {Object} mongo - MongoDB connection object with db property
+ * @param {string} clubIdScope - External ID scope for the club
+ * @param {string} clubId - External ID of the club to process
+ * @param {string} requestId - Unique identifier for tracking the request
+ * @param {boolean} [updatedReferences=true] - Whether to update references after aggregation
+ * @returns {Promise<Object|number|null>} Returns the new aggregation document, 404 if club not found, or null on failure
+ * @throws {Error} Throws error if configuration is invalid or required parameters are missing
+ *
+ * @description
+ * 1. Validates configuration and parameters
+ * 2. Checks if the club exists in the database
+ * 3. Runs aggregation pipeline to build materialized view
+ * 4. Compares old and new aggregation documents
+ * 5. Updates references if requested and aggregation succeeded
  */
-async function processClub(config, mongo, clubIdScope, clubId, requestId) {
+async function processClub(config, mongo, clubIdScope, clubId, requestId, updatedReferences = true) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!clubId || !clubIdScope) throw new Error('Invalid parameters: clubId and clubIdScope are required');
 	//////////////////////////////////////////////////////////////////////////////
@@ -67,12 +59,15 @@ async function processClub(config, mongo, clubIdScope, clubId, requestId) {
 	// Retrieve the new version of the club aggregation and calculate new outbound keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(clubAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	if (_.isObject(newAggregationDoc)) {
-		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
-	} else {
+	if (!_.isObject(newAggregationDoc)) {
 		warn(`Failed to build new aggregation document`, requestId);
 		return null;
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	// Compare old and new aggregation documents to determine if references need to be updated
+	if (updatedReferences === true) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
 	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;

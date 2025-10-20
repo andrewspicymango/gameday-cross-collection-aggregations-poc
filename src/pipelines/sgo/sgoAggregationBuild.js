@@ -8,35 +8,22 @@ const { executeOperationsForReferenceChange } = require('../referenceManagement'
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Builds or rebuilds SGO aggregation documents and synchronizes cross-references.
- *
- * This function performs a complete aggregation build for an SGO, capturing all
- * related resources (competitions, stages, events, teams, sports persons, venues) and
- * maintaining referential integrity across the materialized aggregation collection.
- *
- * Process flow:
- * 1. Validates SGO existence to avoid expensive pipeline execution on missing data
- * 2. Captures current aggregation state (old keys) before rebuilding
- * 3. Executes aggregation pipeline to rebuild SGO materialized view
- * 4. Compares old vs new keys to identify relationship changes
- * 5. Updates cross-references in related resource aggregations:
- *    - Competition aggregations (add/remove SGO reference for membership changes)
- *    - Team aggregations (add/remove SGO reference for membership changes)
- *    - Venue aggregations (add/remove SGO reference for membership changes)
- *
- * The function ensures that when an SGO changes its membership associations,
- * all affected aggregation documents are updated to maintain consistency.
+ * Processes a single SGO (Sports Governmental Organisation) by building its aggregation view and updating references.
  *
  * @async
- * @param {Object} config - Configuration containing mongo.matAggCollectionName
- * @param {Object} mongo - MongoDB connection with db.collection access
- * @param {string} sgoIdScope - External scope identifier for the SGO
- * @param {string} sgoId - External identifier for the SGO
- * @param {string} requestId - Unique identifier for request tracking/logging
- * @returns {Promise<Object|number>} New aggregation document or 404 if SGO not found
- * @throws {Error} If configuration is invalid or required parameters are missing
+ * @function processSgo
+ * @param {Object} config - Configuration object containing MongoDB collection names and other settings
+ * @param {string} config.mongo.matAggCollectionName - Name of the materialized aggregation collection
+ * @param {Object} mongo - MongoDB connection object with db property
+ * @param {string} sgoIdScope - External ID scope for the SGO
+ * @param {string} sgoId - External ID of the SGO to process
+ * @param {string} requestId - Unique identifier for tracking the request
+ * @param {boolean} [updatedReferences=true] - Whether to update references after building aggregation
+ * @returns {Promise<Object|number|null>} Returns 404 if SGO not found, null if aggregation failed,
+ *   or the new aggregation document if successful
+ * @throws {Error} Throws error if configuration is invalid or required parameters are missing
  */
-async function processSgo(config, mongo, sgoIdScope, sgoId, requestId) {
+async function processSgo(config, mongo, sgoIdScope, sgoId, requestId, updatedReferences = true) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!sgoId || !sgoIdScope) throw new Error('Invalid parameters: sgoId and sgoIdScope are required');
 	//////////////////////////////////////////////////////////////////////////////
@@ -63,14 +50,16 @@ async function processSgo(config, mongo, sgoIdScope, sgoId, requestId) {
 	// Retrieve the new version of the SGO aggregation and calculate new outbound keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(sgoAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	if (_.isObject(newAggregationDoc)) {
-		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
-	} else {
+	if (!_.isObject(newAggregationDoc)) {
 		warn(`Failed to build new aggregation document`, requestId);
 		return null;
 	}
-
+	//////////////////////////////////////////////////////////////////////////////
+	// Compare old and new aggregation documents to determine if references need to be updated
+	if (updatedReferences === true) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
 }

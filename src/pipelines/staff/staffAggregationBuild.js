@@ -10,7 +10,49 @@ const { buildOperationsForReferenceChange } = require('../referenceManagement');
 const { executeOperationsForReferenceChange } = require('../referenceManagement');
 
 ////////////////////////////////////////////////////////////////////////////////
-async function processStaff(config, mongo, sportsPersonId, sportsPersonIdScope, teamId, teamIdScope, clubId, clubIdScope, nationId, nationIdScope, requestId) {
+/**
+ * Processes staff aggregation for a sports person associated with a team, club, or nation.
+ * Validates the staff member exists, builds aggregation pipeline, and updates references.
+ *
+ * @async
+ * @function processStaff
+ * @param {Object} config - Configuration object containing mongo settings
+ * @param {string} config.mongo.matAggCollectionName - Name of the materialized aggregation collection
+ * @param {Object} mongo - MongoDB connection object with db property
+ * @param {string} sportsPersonId - External sports person identifier
+ * @param {string} sportsPersonIdScope - Scope/namespace for the sports person ID
+ * @param {string} [teamId] - External team identifier (required if team scope provided)
+ * @param {string} [teamIdScope] - Scope/namespace for the team ID
+ * @param {string} [clubId] - External club identifier (required if club scope provided)
+ * @param {string} [clubIdScope] - Scope/namespace for the club ID
+ * @param {string} [nationId] - External nation identifier (required if nation scope provided)
+ * @param {string} [nationIdScope] - Scope/namespace for the nation ID
+ * @param {string} requestId - Unique identifier for the request (used for logging)
+ * @param {boolean} [updatedReferences=true] - Whether to update cross-references after aggregation
+ * @returns {Promise<Object|number|null>} Returns 404 if staff not found, null on failure, or the new aggregation document
+ * @throws {Error} Throws error for invalid configuration or missing required parameters
+ *
+ * @description
+ * - Validates that either team, club, or nation parameters are provided
+ * - Checks if the staff member exists in the database
+ * - Builds and executes aggregation pipeline
+ * - Compares old vs new aggregation documents
+ * - Updates cross-references if requested and successful
+ */
+async function processStaff(
+	config,
+	mongo,
+	sportsPersonId,
+	sportsPersonIdScope,
+	teamId,
+	teamIdScope,
+	clubId,
+	clubIdScope,
+	nationId,
+	nationIdScope,
+	requestId,
+	updatedReferences = true
+) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!sportsPersonId || !sportsPersonIdScope) throw new Error('Invalid parameters: sportsPersonId and sportsPersonIdScope are required');
 	if (!((_.isString(teamId) && _.isString(teamIdScope)) || (_.isString(clubId) && _.isString(clubIdScope)) || (_.isString(nationId) && _.isString(nationIdScope))))
@@ -76,12 +118,15 @@ async function processStaff(config, mongo, sportsPersonId, sportsPersonIdScope, 
 	await runPipeline(mongo, 'staff', pipelineObj, requestId);
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(staffAggQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	if (_.isObject(newAggregationDoc)) {
-		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
-	} else {
+	if (!_.isObject(newAggregationDoc)) {
 		warn(`Failed to build new aggregation document`, requestId);
 		return null;
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	// Compare old and new aggregation documents to determine if references need to be updated
+	if (updatedReferences === true) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
 	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;

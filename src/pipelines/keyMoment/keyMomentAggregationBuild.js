@@ -7,7 +7,26 @@ const { buildOperationsForReferenceChange } = require('../referenceManagement');
 const { executeOperationsForReferenceChange } = require('../referenceManagement');
 
 ////////////////////////////////////////////////////////////////////////////////
-async function processKeyMoment(config, mongo, eventIdScope, eventId, type, subType, dateTime, requestId) {
+/**
+ * Processes a key moment aggregation by validating parameters, checking if the key moment exists,
+ * running an aggregation pipeline, and optionally updating references based on document changes.
+ *
+ * @async
+ * @function processKeyMoment
+ * @param {Object} config - Configuration object containing mongo settings
+ * @param {string} config.mongo.matAggCollectionName - Name of the materialized aggregation collection
+ * @param {Object} mongo - MongoDB connection object with db property
+ * @param {string} eventIdScope - External event ID scope identifier
+ * @param {string} eventId - External event ID
+ * @param {string} type - Key moment type
+ * @param {string} subType - Key moment sub-type
+ * @param {Date|string} dateTime - Date/time of the key moment (converted to Date if string)
+ * @param {string} requestId - Request identifier for logging/debugging
+ * @param {boolean} [updatedReferences=true] - Whether to update references after aggregation
+ * @returns {Promise<Object|null|number>} Returns the new aggregation document, null on failure, or 404 if key moment not found
+ * @throws {Error} Throws error for invalid configuration or missing required parameters
+ */
+async function processKeyMoment(config, mongo, eventIdScope, eventId, type, subType, dateTime, requestId, updatedReferences = true) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!eventId || !eventIdScope) throw new Error('Invalid parameters: eventId and eventIdScope are required');
 	if (!_.isDate(new Date(dateTime)) && !_.isDate(dateTime)) throw new Error('Invalid parameters: dateTime must be a valid date string');
@@ -37,13 +56,17 @@ async function processKeyMoment(config, mongo, eventIdScope, eventId, type, subT
 	// Retrieve the new version of the event aggregation
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(keyMomentAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	if (_.isObject(newAggregationDoc)) {
-		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
-	} else {
+	if (!_.isObject(newAggregationDoc)) {
 		warn(`Failed to build new aggregation document`, requestId);
 		return null;
 	}
+	//////////////////////////////////////////////////////////////////////////////
+	// Compare old and new aggregation documents to determine if references need to be updated
+	if (updatedReferences === true) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	}
+	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
 }
 

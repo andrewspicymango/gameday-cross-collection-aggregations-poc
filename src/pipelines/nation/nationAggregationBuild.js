@@ -11,29 +11,29 @@ const { executeOperationsForReferenceChange } = require('../referenceManagement'
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Processes a nation aggregation by rebuilding the materialized aggregation data
- * and updating any references that may have changed.
+ * Processes nation aggregation by rebuilding materialized aggregation documents
+ * and optionally updating related references.
  *
  * @async
  * @function processNation
  * @param {Object} config - Configuration object containing mongo settings
- * @param {string} config.mongo.matAggCollectionName - Name of the materialized aggregation collection
+ * @param {string} config.mongo.matAggCollectionName - Name of materialized aggregation collection
  * @param {Object} mongo - MongoDB connection object with db property
- * @param {string} nationIdScope - The scope/namespace for the nation ID
- * @param {string} nationId - The external ID of the nation to process
- * @param {string} requestId - Unique identifier for the request (used for debugging)
- * @returns {Promise<Object|number>} Returns 404 if nation not found, otherwise returns the new aggregation document
- * @throws {Error} Throws error if config.mongo.matAggCollectionName is not a string
- * @throws {Error} Throws error if nationId or nationIdScope are missing
+ * @param {string} nationIdScope - External ID scope for the nation
+ * @param {string} nationId - External ID of the nation to process
+ * @param {string} requestId - Request identifier for logging/debugging
+ * @param {boolean} [updatedReferences=true] - Whether to update related references
+ * @returns {Promise<Object|number|null>} Returns the new aggregation document on success,
+ *   404 if nation not found, or null on failure
+ * @throws {Error} When configuration is invalid or required parameters are missing
  *
  * @description
- * 1. Validates configuration and parameters
- * 2. Checks if the nation exists in the database
- * 3. Captures the current aggregation state for comparison
- * 4. Runs the aggregation pipeline to rebuild data
- * 5. Compares old vs new aggregation and executes reference updates
+ * 1. Validates nation exists in the database
+ * 2. Runs aggregation pipeline to rebuild materialized view
+ * 3. Compares old vs new aggregation documents
+ * 4. Updates references in related collections if specified
  */
-async function processNation(config, mongo, nationIdScope, nationId, requestId) {
+async function processNation(config, mongo, nationIdScope, nationId, requestId, updatedReferences = true) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!nationId || !nationIdScope) throw new Error('Invalid parameters: nationId and nationIdScope are required');
 	//////////////////////////////////////////////////////////////////////////////
@@ -58,12 +58,15 @@ async function processNation(config, mongo, nationIdScope, nationId, requestId) 
 	// Retrieve the new version of the nation aggregation and calculate new reference keys
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(nationAggQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	if (_.isObject(newAggregationDoc)) {
-		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
-	} else {
+	if (!_.isObject(newAggregationDoc)) {
 		warn(`Failed to build new aggregation document`, requestId);
 		return null;
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	// Compare old and new aggregation documents to determine if references need to be updated
+	if (updatedReferences === true) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
 	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;

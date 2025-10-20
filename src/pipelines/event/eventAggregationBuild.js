@@ -8,36 +8,25 @@ const { executeOperationsForReferenceChange } = require('../referenceManagement'
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Builds or rebuilds event aggregation documents and synchronizes cross-references.
+ * Processes an event by building and updating its aggregation document.
  *
- * This function performs a complete aggregation build for an event, capturing all
- * related resources (stages, venues, teams, sports persons) and maintaining referential
- * integrity across the materialized aggregation collection.
+ * Validates the event exists, runs an aggregation pipeline to build/update the event's
+ * materialized view, and optionally updates references if the aggregation changed.
  *
- * Process flow:
- * 1. Validates event existence to avoid expensive pipeline execution on missing data
- * 2. Captures current aggregation state (old keys) before rebuilding
- * 3. Executes aggregation pipeline to rebuild event materialized view
- * 4. Compares old vs new keys to identify relationship changes
- * 5. Updates cross-references in related resource aggregations:
- *    - Stage aggregations (add/remove event reference)
- *    - Venue aggregations (add/remove event reference)
- *    - Team aggregations (add/remove event reference for participant changes)
- *    - Sports person aggregations (add/remove event reference for participant changes)
+ * @param {Object} config - Configuration object containing mongo settings
+ * @param {string} config.mongo.matAggCollectionName - Name of the materialized aggregation collection
+ * @param {Object} mongo - MongoDB connection object with db property
+ * @param {string} eventIdScope - External ID scope for the event
+ * @param {string} eventId - External ID of the event to process
+ * @param {string} requestId - Request identifier for logging/debugging
+ * @param {boolean} [updatedReferences=true] - Whether to update references after aggregation
  *
- * The function ensures that when an event moves between stages/venues or changes
- * participants, all affected aggregation documents are updated to maintain consistency.
+ * @returns {Promise<Object|number|null>} Returns the new aggregation document on success,
+ *   404 if event not found, or null if aggregation build failed
  *
- * @async
- * @param {Object} config - Configuration containing mongo.matAggCollectionName
- * @param {Object} mongo - MongoDB connection with db.collection access
- * @param {string} eventIdScope - External scope identifier for the event
- * @param {string} eventId - External identifier for the event
- * @param {string} requestId - Unique identifier for request tracking/logging
- * @returns {Promise<Object|number>} New aggregation document or 404 if event not found
- * @throws {Error} If configuration is invalid or required parameters are missing
+ * @throws {Error} When config.mongo.matAggCollectionName is invalid or eventId/eventIdScope missing
  */
-async function processEvent(config, mongo, eventIdScope, eventId, requestId) {
+async function processEvent(config, mongo, eventIdScope, eventId, requestId, updatedReferences = true) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!eventId || !eventIdScope) throw new Error('Invalid parameters: eventId and eventIdScope are required');
 	//////////////////////////////////////////////////////////////////////////////
@@ -63,13 +52,17 @@ async function processEvent(config, mongo, eventIdScope, eventId, requestId) {
 	// Retrieve the new version of the event aggregation
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(eventAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	if (_.isObject(newAggregationDoc)) {
-		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
-	} else {
+	if (!_.isObject(newAggregationDoc)) {
 		warn(`Failed to build new aggregation document`, requestId);
 		return null;
 	}
+	//////////////////////////////////////////////////////////////////////////////
+	// Compare old and new aggregation documents to determine if references need to be updated
+	if (updatedReferences === true) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
+	}
+	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
 }
 

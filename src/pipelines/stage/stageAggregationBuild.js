@@ -1,5 +1,5 @@
 const _ = require('lodash');
-const { debug } = require('../../log');
+const { debug, warn } = require('../../log');
 const { runPipeline } = require('../runPipeline');
 const { pipeline } = require('./stageAggregationPipeline');
 const { queryForStageAggregationDoc } = require('./stageAggregationPipeline');
@@ -8,7 +8,7 @@ const { executeOperationsForReferenceChange } = require('../referenceManagement'
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * Processes a stage aggregation by building and updating the materialized aggregation data.
+ * Processes a stage aggregation by building and updating aggregated data for a specific stage.
  *
  * @async
  * @function processStage
@@ -17,18 +17,19 @@ const { executeOperationsForReferenceChange } = require('../referenceManagement'
  * @param {Object} mongo - MongoDB connection object with db property
  * @param {string} stageIdScope - External ID scope for the stage
  * @param {string} stageId - External ID of the stage to process
- * @param {string} requestId - Unique identifier for tracking the request
- * @returns {Promise<Object|number>} Returns the new aggregation document on success, or 404 if stage not found
+ * @param {string} requestId - Unique identifier for the request (used for logging)
+ * @param {boolean} [updatedReferences=true] - Whether to update references after aggregation
+ * @returns {Promise<Object|number|null>} Returns the new aggregation document, 404 if stage not found, or null on failure
  * @throws {Error} Throws error if configuration is invalid or required parameters are missing
  *
  * @description
- * 1. Validates configuration and parameters
+ * 1. Validates input parameters and configuration
  * 2. Checks if the stage exists in the database
  * 3. Retrieves the current aggregation document (if exists)
  * 4. Runs the aggregation pipeline to build new data
- * 5. Compares old vs new aggregation and updates references accordingly
+ * 5. Compares old vs new aggregation and updates references if needed
  */
-async function processStage(config, mongo, stageIdScope, stageId, requestId) {
+async function processStage(config, mongo, stageIdScope, stageId, requestId, updatedReferences = true) {
 	if (!_.isString(config?.mongo?.matAggCollectionName)) throw new Error('Invalid configuration: config.mongo.matAggCollectionName must be a string');
 	if (!stageId || !stageIdScope) throw new Error('Invalid parameters: stageId and stageIdScope are required');
 	//////////////////////////////////////////////////////////////////////////////
@@ -54,13 +55,15 @@ async function processStage(config, mongo, stageIdScope, stageId, requestId) {
 	// Retrieve the new version of the stage aggregation
 	const newAggregationDoc = await mongo.db.collection(config.mongo.matAggCollectionName).findOne(stageAggregationDocQuery);
 	//////////////////////////////////////////////////////////////////////////////
-	// Compare old and new aggregation documents to determine if references need to be updated
-	if (_.isObject(newAggregationDoc)) {
-		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
-		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
-	} else {
+	if (!_.isObject(newAggregationDoc)) {
 		warn(`Failed to build new aggregation document`, requestId);
 		return null;
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	// Compare old and new aggregation documents to determine if references need to be updated
+	if (updatedReferences === true) {
+		const operations = buildOperationsForReferenceChange(oldAggregationDoc, newAggregationDoc);
+		await executeOperationsForReferenceChange(mongo, config, operations, requestId);
 	}
 	//////////////////////////////////////////////////////////////////////////////
 	return newAggregationDoc;
