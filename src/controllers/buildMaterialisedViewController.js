@@ -5,7 +5,7 @@ const uuid = require('uuid');
 const { send200, send400, send404, send500 } = require('../utils/httpResponseUtils.js');
 const { debug, info, warn } = require('../log.js');
 const config = require('../config.js');
-const runPipeline = require('../pipelines/runPipeline.js');
+const { rebuildAggregationDocumentsForCompetition } = require('../pipelines/rebuildAggregationDocumentsForCompetition.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 const { processCompetition } = require('../pipelines/competition/competitionAggregationBuild.js');
@@ -135,6 +135,7 @@ async function buildMaterialisedViewControllerForIdScopeResources(req, res) {
 	const scope = req.params.scope;
 	const requestedId = req.params.id;
 	const createResource = req?.query?.create && req.query.create === 'true' ? true : false;
+	const fullRebuild = req?.query?.fullRebuild && req.query.fullRebuild === 'true' ? true : false;
 	const schema = checkSchema(schemaType);
 	const mongo = config?.mongo;
 
@@ -175,6 +176,11 @@ async function buildMaterialisedViewControllerForIdScopeResources(req, res) {
 		// COMPETITIONS
 		if (schemaType.toLowerCase() == 'competitions') {
 			response = await processCompetition(config, mongo, scope, requestedId, id);
+			if (fullRebuild === true) {
+				debug(`Full rebuild requested for competition ${response?.externalKey}`, id);
+				await rebuildAggregationDocumentsForCompetition(mongo, config, response, id);
+				debug(`Full rebuild completed for competition ${response?.externalKey}`, id);
+			}
 		}
 		////////////////////////////////////////////////////////////////////////////
 		// STAGES

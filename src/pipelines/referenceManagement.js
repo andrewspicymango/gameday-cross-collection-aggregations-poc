@@ -72,7 +72,14 @@ async function executeOperationsForReferenceChange(mongo, config, operations, re
 	if (!operations || operations.length === 0) return;
 	try {
 		const result = await mongo.db.collection(config.mongo.matAggCollectionName).bulkWrite(operations);
-		debug(`Updated aggregation references, result: ${JSON.stringify(result)}`, requestId);
+		const resultSummary = {
+			insertedCount: result.insertedCount,
+			matchedCount: result.matchedCount,
+			modifiedCount: result.modifiedCount,
+			deletedCount: result.deletedCount,
+			upsertedCount: result.upsertedCount,
+		};
+		debug(`Updated aggregation references, result: ${JSON.stringify(resultSummary)}`, requestId);
 	} catch (error) {
 		warn(`Error executing bulk write: ${error.message}`, requestId);
 	}
