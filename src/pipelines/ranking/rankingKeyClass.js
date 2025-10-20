@@ -18,30 +18,11 @@ const {
 ////////////////////////////////////////////////////////////////////////////////
 class RankingKeyClass {
 	//////////////////////////////////////////////////////////////////////////////
-	constructor({
-		sportsPersonId,
-		sportsPersonIdScope,
-		teamId,
-		teamIdScope,
-		clubId,
-		clubIdScope,
-		nationId,
-		nationIdScope,
-		stageId,
-		stageIdScope,
-		eventId,
-		eventIdScope,
-		dateTimeLabel,
-		ranking,
-	}) {
+	constructor({ sportsPersonId, sportsPersonIdScope, teamId, teamIdScope, stageId, stageIdScope, eventId, eventIdScope, dateTimeLabel, ranking }) {
 		this.sportsPersonId = sportsPersonId;
 		this.sportsPersonIdScope = sportsPersonIdScope;
 		this.teamId = teamId;
 		this.teamIdScope = teamIdScope;
-		this.clubId = clubId;
-		this.clubIdScope = clubIdScope;
-		this.nationId = nationId;
-		this.nationIdScope = nationIdScope;
 		this.stageId = stageId;
 		this.stageIdScope = stageIdScope;
 		this.eventId = eventId;
