@@ -14,15 +14,6 @@
 			"args": ["-v"]
 		},
 		{
-			"type": "node",
-			"request": "launch",
-			"name": "node src/pipelines/clientAggregationPipelineBuilderTester.js",
-			"skipFiles": ["<node_internals>/**"],
-			"program": "${workspaceFolder}/src/pipelines/clientAggregationPipelineBuilderTester.js",
-			"outFiles": ["${workspaceFolder}/**/*.js"],
-			"args": []
-		},
-		{
 			"name": "Run fetch-aggregations.js",
 			"type": "node",
 			"request": "launch",
