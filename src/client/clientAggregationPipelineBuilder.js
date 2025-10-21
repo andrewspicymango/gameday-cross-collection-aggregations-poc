@@ -1,3 +1,5 @@
+const _ = require('lodash');
+
 ////////////////////////////////////////////////////////////////////////////////
 // Constants & config
 ////////////////////////////////////////////////////////////////////////////////
@@ -15,12 +17,13 @@ const fieldsToExcludeFromMaterialisedResources = {
 ////////////////////////////////////////////////////////////////////////////////
 // API (explicit routes only, strict parsing + cycle & duplicate-edge detection)
 ////////////////////////////////////////////////////////////////////////////////
-function buildMaterialisedListsPipelineTotalMax({
+function clientAggregationPipelineBuilder({
 	rootType,
 	rootExternalKey,
 	totalMax,
 	routes, // [{ key, to, via: ["from.field->to", ...] }, ...]  REQUIRED
 	includeTypes, // ["team", "venue", ...] REQUIRED (controls materialisation + budget order)
+	fieldProjections,
 	edges,
 	collectionMap,
 }) {
@@ -35,6 +38,11 @@ function buildMaterialisedListsPipelineTotalMax({
 	}
 	if (!Number.isInteger(totalMax) || totalMax < 0) {
 		throw new Error('totalMax must be a non-negative integer');
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	// Validate fieldProjections if provided
+	if (fieldProjections && typeof fieldProjections !== 'object') {
+		throw new Error('fieldProjections must be an object mapping resource types to inclusions and exclusions');
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
@@ -202,17 +210,37 @@ function buildMaterialisedListsPipelineTotalMax({
 
 	//////////////////////////////////////////////////////////////////////////////
 	// Materialise via $facet: root + one facet per included type
-	const sortStageFor = (type) => [{ $sort: { _id: 1 } }];
+	const sortStageFor = (type) => {
+		if (type === 'competition') {
+			return [{ $sort: { start: -1, _id: 1 } }];
+		} else if (type === 'event' || type === 'keyMoment') {
+			return [{ $sort: { dateTime: -1, _id: 1 } }];
+		} else if (type === 'team' || type === 'venue' || type === 'club' || type === 'nation' || type === 'sgo') {
+			return [{ $sort: { name: -1, _id: 1 } }];
+		} else if (type === 'sportsPerson' || type === 'staff') {
+			return [{ $sort: { lastName: -1, _id: 1 } }];
+		} else if (type === 'ranking') {
+			return [{ $sort: { _externalStageId: -1, _externalEventId: -1, ranking: -1, _id: 1 } }];
+		} else {
+			return [{ $sort: { _id: 1 } }];
+		}
+	};
 	const facet = {};
 	//////////////////////////////////////////////////////////////////////////////
 	// Root facet
+	const rootProjectionInclusions = buildProjectionForType(rootType, fieldProjections, true);
+	const rootProjectionExclusions = buildProjectionForType(rootType, fieldProjections, false);
+	const rootLookupPipeline = [{ $match: { $expr: { $in: ['$_id', '$$ids'] } } }, ...sortStageFor(rootType)];
+	if (rootProjectionExclusions) rootLookupPipeline.push({ $project: rootProjectionExclusions });
+	if (rootProjectionInclusions) rootLookupPipeline.push({ $project: rootProjectionInclusions });
+
 	facet[rootType] = [
 		{ $project: { includedIds: '$_rootIncludedIds', overflowIds: '$_rootOverflowIds' } },
 		{
 			$lookup: {
 				from: COLLECTIONS_FOR_PIPELINE[rootType],
 				let: { ids: '$includedIds' },
-				pipeline: [{ $match: { $expr: { $in: ['$_id', '$$ids'] } } }, ...sortStageFor(rootType), { $project: fieldsToExcludeFromMaterialisedResources }],
+				pipeline: rootLookupPipeline,
 				as: 'docs',
 			},
 		},
@@ -224,13 +252,18 @@ function buildMaterialisedListsPipelineTotalMax({
 	for (const t of includeTypes) {
 		const includedVar = `_inc_${t}_ids`;
 		const overflowVar = `_ovf_${t}_ids`;
+		const typeProjectionInclusions = buildProjectionForType(t, fieldProjections, true);
+		const typeProjectionExclusions = buildProjectionForType(t, fieldProjections, false);
+		const typeLookupPipeline = [{ $match: { $expr: { $in: ['$_id', '$$ids'] } } }, ...sortStageFor(t)];
+		if (typeProjectionExclusions) typeLookupPipeline.push({ $project: typeProjectionExclusions });
+		if (typeProjectionInclusions) typeLookupPipeline.push({ $project: typeProjectionInclusions });
 		facet[t] = [
 			{ $project: { includedIds: `$${includedVar}`, overflowIds: `$${overflowVar}` } },
 			{
 				$lookup: {
 					from: COLLECTIONS_FOR_PIPELINE[t],
 					let: { ids: '$includedIds' },
-					pipeline: [{ $match: { $expr: { $in: ['$_id', '$$ids'] } } }, ...sortStageFor(t), { $project: fieldsToExcludeFromMaterialisedResources }],
+					pipeline: typeLookupPipeline,
 					as: 'docs',
 				},
 			},
@@ -363,6 +396,43 @@ function planSteps(paths) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Helper function to build projection stage for a resource type
+function buildProjectionForType(resourceType, fieldProjections, include) {
+	//////////////////////////////////////////////////////////////////////////////
+	let projection = null;
+	//////////////////////////////////////////////////////////////////////////////
+	// Inclusions
+	if (include === true) {
+		if (_.isObject(fieldProjections?.inclusions?.all) && Object.keys(fieldProjections.inclusions.all).length > 0) {
+			for (const key in fieldProjections.inclusions.all) fieldProjections.inclusions.all[key] = 1;
+			if (projection == null) projection = fieldProjections.inclusions.all;
+			projection = fieldProjections.inclusions.all;
+		}
+		if (_.isObject(fieldProjections?.inclusions?.[resourceType]) && Object.keys(fieldProjections.inclusions[resourceType]).length > 0) {
+			for (const key in fieldProjections.inclusions[resourceType]) fieldProjections.inclusions[resourceType][key] = 1;
+			if (projection == null) projection = {};
+			projection = { ...projection, ...fieldProjections.inclusions[resourceType] };
+		}
+		return projection;
+	}
+	//////////////////////////////////////////////////////////////////////////////
+	// Exclusions
+	else {
+		if (_.isObject(fieldProjections?.exclusions?.all) && Object.keys(fieldProjections.exclusions.all).length > 0) {
+			for (const key in fieldProjections.inclusions.all) fieldProjections.exclusions.all[key] = 0;
+			if (projection == null) projection = fieldProjections.exclusions.all;
+			projection = fieldProjections.exclusions.all;
+		}
+		if (_.isObject(fieldProjections?.exclusions?.[resourceType]) && Object.keys(fieldProjections.exclusions[resourceType]).length > 0) {
+			for (const key in fieldProjections.exclusions[resourceType]) fieldProjections.exclusions[resourceType][key] = 0;
+			if (projection == null) projection = {};
+			projection = { ...projection, ...fieldProjections.exclusions[resourceType] };
+		}
+		return projection;
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Hop key helper
 function makeKey(from, field, to) {
 	return `${from}.${field}->${to}`;
@@ -383,4 +453,4 @@ function safeVar(s) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = buildMaterialisedListsPipelineTotalMax;
+module.exports = clientAggregationPipelineBuilder;

@@ -210,10 +210,37 @@ async function getSingleSportsData(req, res) {
 					return;
 			}
 
+			//////////////////////////////////////////////////////////////////////////
+			// Manage the projections
+			const fieldProjections = {};
+			fieldProjections.exclusions = {};
+			fieldProjections.exclusions.all = {};
+			fieldProjections.inclusions = {};
+			fieldProjections.inclusions.all = {};
+			if (req.query.includeOriginal !== true && req.query.includeOriginal !== 'true') fieldProjections.exclusions.all._original = 0;
+			if (req.query.includeStickies !== true && req.query.includeStickies !== 'true') fieldProjections.exclusions.all._stickies = 0;
+			for (const [key, value] of Object.entries(req?.query || {})) {
+				if (key.startsWith('projection.')) {
+					const field = key.replace('projection.', '');
+					fieldProjections.inclusions[field] = value.split(',').reduce((acc, curr) => {
+						acc[curr.trim()] = 1;
+						return acc;
+					}, {});
+				}
+				if (key.startsWith('projection~')) {
+					const field = key.replace('projection~', '');
+					fieldProjections.exclusions[field] = value.split(',').reduce((acc, curr) => {
+						acc[curr.trim()] = 0;
+						return acc;
+					}, {});
+				}
+			}
+
+			//////////////////////////////////////////////////////////////////////////
 			const clientAggregationPipelineRouteBuilder = require('../client/clientAggregationPipelineRouteBuilder.js');
 			const clientAggregationPipelineBuilder = require('../client/clientAggregationPipelineBuilder.js');
 			const routes = clientAggregationPipelineRouteBuilder({ rootType, includeTypes: aggregationViews.split(','), edgeIds: aggregationEdges.split(',') });
-			const pipelineConfig = { rootType, rootExternalKey: rootKey, totalMax: aggregationMax, routes, includeTypes: aggregationViews.split(',') };
+			const pipelineConfig = { rootType, rootExternalKey: rootKey, totalMax: aggregationMax, routes, includeTypes: aggregationViews.split(','), fieldProjections };
 			const pipeline = clientAggregationPipelineBuilder(pipelineConfig);
 			const a = await mongo.db
 				.collection(config?.matAggCollectionName || 'materialisedAggregations')
