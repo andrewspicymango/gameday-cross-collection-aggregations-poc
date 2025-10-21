@@ -1,0 +1,17 @@
+////////////////////////////////////////////////////////////////////////////////
+const TYPE_ALIAS = {
+	competition: 'c',
+	stage: 's',
+	event: 'e',
+	team: 't',
+	venue: 'v',
+	club: 'b',
+	sgo: 'o',
+	nation: 'n',
+	sportsPerson: 'p',
+	staff: 'f',
+	ranking: 'r',
+	keyMoment: 'k',
+};
+////////////////////////////////////////////////////////////////////////////////
+module.exports = TYPE_ALIAS;
