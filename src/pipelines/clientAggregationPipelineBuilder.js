@@ -3,6 +3,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 const idField = 'gamedayId';
 const aggregationCollectionName = 'materialisedAggregations';
+const EDGES = require('./clientAggregationPipelineBuilderEdges.js');
+const COLLECTIONS = require('./clientAggregationPipelineBuilderCollections.js');
 
 // Fields to hide when materialising final resources
 const fieldsToExcludeFromMaterialisedResources = {
@@ -41,60 +43,17 @@ function buildMaterialisedListsPipelineTotalMax({
 
 	//////////////////////////////////////////////////////////////////////////////
 	// Directed, field-labelled graph
-	const EDGES = edges || {
-		competition: { stages: 'stage', sgos: 'sgo' },
-		stage: { events: 'event', competitions: 'competition', rankings: 'ranking' },
-		event: {
-			teams: 'team',
-			venues: 'venue',
-			sportsPersons: 'sportsPerson',
-			stages: 'stage',
-			rankings: 'ranking',
-			keyMoments: 'keyMoment',
-		},
-		team: {
-			clubs: 'club',
-			events: 'event',
-			nations: 'nation',
-			sportsPersons: 'sportsPerson',
-			staff: 'staff',
-			rankings: 'ranking',
-			sgos: 'sgo',
-			keyMoments: 'keyMoment',
-			venues: 'venue',
-		},
-		venue: { events: 'event', teams: 'team', sgos: 'sgo', clubs: 'club', nations: 'nation' },
-		club: { teams: 'team', sgos: 'sgo', venues: 'venue', sportsPersons: 'sportsPerson', staff: 'staff' },
-		sgo: { competitions: 'competition', sgos: 'sgo', venues: 'venue', clubs: 'club', nations: 'nation', teams: 'team' },
-		nation: { teams: 'team', sgos: 'sgo', venues: 'venue', staff: 'staff' },
-		staff: { sportsPersons: 'sportsPerson', teams: 'team', clubs: 'club', nations: 'nation' },
-		sportsPerson: { teams: 'team', clubs: 'club', events: 'event', staff: 'staff', rankings: 'ranking', keyMoments: 'keyMoment' },
-		rankings: { events: 'event', stages: 'stage', teams: 'team', sportsPersons: 'sportsPerson' },
-		keyMoments: { events: 'event', sportsPersons: 'sportsPerson', teams: 'team' },
-	};
+	const EDGES_FOR_PIPELINE = edges || EDGES;
 
 	//////////////////////////////////////////////////////////////////////////////
 	// resourceType -> real collection (for final materialisation)
-	const COLLECTIONS = collectionMap || {
-		competition: 'competitions',
-		stage: 'stages',
-		event: 'events',
-		team: 'teams',
-		venue: 'venues',
-		club: 'clubs',
-		sgo: 'sgos',
-		nation: 'nations',
-		sportsPerson: 'sportsPersons',
-		staff: 'staff',
-		ranking: 'rankings',
-		keyMoment: 'keyMoments',
-	};
+	const COLLECTIONS_FOR_PIPELINE = collectionMap || COLLECTIONS;
 
 	//////////////////////////////////////////////////////////////////////////////
 	// Validate that we can materialise root + requested include types
 	const allToMaterialise = new Set([rootType, ...includeTypes]);
 	for (const t of allToMaterialise) {
-		if (!COLLECTIONS[t]) {
+		if (!COLLECTIONS_FOR_PIPELINE[t]) {
 			throw new Error(`No collection mapping for resourceType='${t}'. Provide 'collectionMap' or extend defaults.`);
 		}
 	}
@@ -104,7 +63,7 @@ function buildMaterialisedListsPipelineTotalMax({
 	const parsedRoutes = routes.map((r) => ({
 		key: r.key,
 		to: r.to,
-		path: parseExplicitRouteStrictNoCyclesNoDup({ EDGES, rootType, route: r }),
+		path: parseExplicitRouteStrictNoCyclesNoDup({ EDGES: EDGES_FOR_PIPELINE, rootType, route: r }),
 	}));
 
 	//////////////////////////////////////////////////////////////////////////////
@@ -251,7 +210,7 @@ function buildMaterialisedListsPipelineTotalMax({
 		{ $project: { includedIds: '$_rootIncludedIds', overflowIds: '$_rootOverflowIds' } },
 		{
 			$lookup: {
-				from: COLLECTIONS[rootType],
+				from: COLLECTIONS_FOR_PIPELINE[rootType],
 				let: { ids: '$includedIds' },
 				pipeline: [{ $match: { $expr: { $in: ['$_id', '$$ids'] } } }, ...sortStageFor(rootType), { $project: fieldsToExcludeFromMaterialisedResources }],
 				as: 'docs',
@@ -269,7 +228,7 @@ function buildMaterialisedListsPipelineTotalMax({
 			{ $project: { includedIds: `$${includedVar}`, overflowIds: `$${overflowVar}` } },
 			{
 				$lookup: {
-					from: COLLECTIONS[t],
+					from: COLLECTIONS_FOR_PIPELINE[t],
 					let: { ids: '$includedIds' },
 					pipeline: [{ $match: { $expr: { $in: ['$_id', '$$ids'] } } }, ...sortStageFor(t), { $project: fieldsToExcludeFromMaterialisedResources }],
 					as: 'docs',
