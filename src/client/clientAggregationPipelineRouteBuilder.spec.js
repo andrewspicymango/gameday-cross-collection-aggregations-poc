@@ -1,4 +1,4 @@
-const { clientAggregationPipelineRouteBuilder } = require('./clientAggregationPipelineRouteBuilder');
+const clientAggregationPipelineRouteBuilder = require('./clientAggregationPipelineRouteBuilder');
 const EDGES = require('./clientAggregationPipelineBuilderEdges');
 
 ////////////////////////////////////////////////////////////////////////////////

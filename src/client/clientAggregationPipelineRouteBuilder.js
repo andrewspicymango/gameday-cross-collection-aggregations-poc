@@ -291,4 +291,4 @@ function shortHash(s) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = { clientAggregationPipelineRouteBuilder };
+module.exports = clientAggregationPipelineRouteBuilder;

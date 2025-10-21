@@ -1,4 +1,4 @@
-const { buildMaterialisedListsPipelineTotalMax } = require('./clientAggregationPipelineBuilder');
+const buildMaterialisedListsPipelineTotalMax = require('./clientAggregationPipelineBuilder');
 
 ////////////////////////////////////////////////////////////////////////////////
 describe('Client Aggregation Pipeline Builder', () => {

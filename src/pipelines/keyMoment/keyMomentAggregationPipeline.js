@@ -86,9 +86,9 @@ const pipeline = (config, EVENT_SCOPE, EVENT_ID, TYPE, SUBTYPE, DATETIME) => {
 
 ////////////////////////////////////////////////////////////////////////////////
 function queryForKeyMomentAggregationDoc(eventId, eventIdScope, type, subType, dateTime) {
-	if (!eventId || !eventIdScope) throw new Error('Invalid parameters: eventId and eventIdScope are required');
-	if (!type || !subType) throw new Error('Invalid parameters: type and subType are required');
-	if (!dateTime || isNaN(new Date(dateTime).getTime())) throw new Error('Invalid parameters: dateTime must be a valid date string');
+	if (!eventId || !eventIdScope) throw new Error('Invalid parameters: eventId and eventIdScope are required for a keyMoment');
+	if (!type || !subType) throw new Error('Invalid parameters: type and subType are required for a keyMoment');
+	if (!dateTime || isNaN(new Date(dateTime).getTime())) throw new Error('Invalid parameters: dateTime must be a valid date string for a keyMoment');
 
 	// The `toISOString()` method always returns dates in UTC timezone with the format `YYYY-MM-DDTHH:mm:ss.sssZ`, where the `Z` indicates UTC (Zulu time).
 	// For example:

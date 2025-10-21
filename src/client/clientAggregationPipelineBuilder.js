@@ -383,4 +383,4 @@ function safeVar(s) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = { buildMaterialisedListsPipelineTotalMax };
+module.exports = buildMaterialisedListsPipelineTotalMax;

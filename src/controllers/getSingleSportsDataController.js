@@ -1,13 +1,15 @@
 const _ = require(`lodash`);
 const uuid = require('uuid');
+const { keySeparator } = require('../pipelines/constants');
 const { send200, send400, send404, send500 } = require('../utils/httpResponseUtils');
 const { debug, info, warn } = require('../log.js');
 const config = require('../config.js');
 
 const { writeFileSyncWithDirs } = require(`../utils/fileUtils.js`);
+const maxMaterialisedResources = 50;
 
 // curl localhost:8080/1-0/competitions/bblapi/2023:BBL
-// curl localhost:8080/1-0/competitions/fifa/1jt5mxgn4q5r6mknmlqv5qjh0
+// curl localhost:8080/1-0/competitions/fifa/289715
 
 ////////////////////////////////////////////////////////////////////////////////
 const checkSchema = function (schema) {
@@ -55,7 +57,6 @@ async function getSingleSportsData(req, res) {
 	const schemaType = req.params.schemaType;
 	const scope = req.params.scope;
 	const requestedId = req.params.id;
-	const aggregation = req?.query?.aggregation ? req.query.aggregation.toLowerCase() : null;
 	const schema = checkSchema(schemaType);
 	const mongo = config?.mongo;
 
@@ -95,37 +96,196 @@ async function getSingleSportsData(req, res) {
 			return;
 		}
 
+		////////////////////////////////////////////////////////////////////////////
+		delete r.stickies;
+		if (r._original && req.query.includeOriginal !== true && req.query.includeOriginal !== 'true') delete r._original;
+		if (r._stickies && req.query.includeStickies !== true && req.query.includeStickies !== 'true') delete r._stickies;
+
+		////////////////////////////////////////////////////////////////////////////r
 		info(report, id);
 
 		////////////////////////////////////////////////////////////////////////////
-		// We have an aggregation request - process it here
-		if (aggregation) {
-			const aggregationString = aggregation.toLowerCase();
-			const aggregations = new Set();
-			const requestedAggregationPaths = aggregation.split(',').map((a) => a.trim());
-			for (const aggregationPath of requestedAggregationPaths) {
-				const aggregationElements = aggregationPath.split('.').map((a) => a.trim());
-				for (const element of aggregationElements) {
-					aggregations.add(element);
-				}
-			}
-			debug(`Requested aggregations: ${Array.from(aggregations).join(', ')}`, id);
+		const aggregationViews = req.query?.aggregationViews ? req.query.aggregationViews : null;
+		const aggregationEdges = req.query?.aggregationEdges ? req.query.aggregationEdges : null;
+		let aggregationMax = req.query?.aggregationMax ? parseInt(req.query.aggregationMax, 10) : maxMaterialisedResources;
+		if (isNaN(aggregationMax) || aggregationMax < 0 || aggregationMax > maxMaterialisedResources) aggregationMax = maxMaterialisedResources;
+		////////////////////////////////////////////////////////////////////////////
+		// We are attempting an aggregation
+		if (aggregationViews && aggregationEdges && aggregationViews.length > 0 && aggregationEdges.length > 0) {
+			info(`Aggregation requested: views=${aggregationViews}, edges=${aggregationEdges}, max=${aggregationMax}`, id);
+			let rootKey = null;
+			let rootType = null;
+			const resourceType = r?.resourceType ? r.resourceType.toLowerCase() : null;
 			//////////////////////////////////////////////////////////////////////////
-			if (r.resourceType && r.resourceType.toLowerCase() === 'competition' && aggregation.startsWith('cs')) {
-				const aggregationsResult = await ManageCSAggregation(mongo, aggregations, r, aggregationString, id);
-				send200(res, aggregationsResult);
+			// determine root document type and externalKey
+			switch (resourceType) {
+				case 'competition':
+				case 'stage':
+				case 'event':
+				case 'sgo':
+				case 'team':
+				case 'club':
+				case 'nation':
+				case 'venue':
+					rootKey = `${r._externalId}${keySeparator}${r._externalIdScope}`;
+					rootType = resourceType;
+					break;
+				case 'sportsperson':
+					rootKey = `${r._externalId}@${r._externalIdScope}`;
+					rootType = 'sportsPerson';
+					break;
+				case 'ranking':
+					const RankingKeyClass = require('../pipelines/ranking/rankingKeyClass.js');
+					const spId = r?._externalSportsPersonId ? r._externalSportsPersonId : null;
+					const spIdScope = r?._externalSportsPersonIdScope ? r._externalSportsPersonIdScope : null;
+					const teamId = r?._externalTeamId ? r._externalTeamId : null;
+					const teamIdScope = r?._externalTeamIdScope ? r._externalTeamIdScope : null;
+					const stageId = r?._externalStageId ? r._externalStageId : null;
+					const stageIdScope = r?._externalStageIdScope ? r._externalStageIdScope : null;
+					const eventId = r?._externalEventId ? r._externalEventId : null;
+					const eventIdScope = r?._externalEventIdScope ? r._externalEventIdScope : null;
+					const label = r?.dateTime ? r.dateTime : null;
+					const rank = r?.ranking ? r.ranking : null;
+					const keyInstance = new RankingKeyClass(spIdScope, spId, teamIdScope, teamId, stageIdScope, stageId, eventIdScope, eventId, label, ranking);
+					if (!keyInstance.validate()) {
+						warn(`Invalid RankingKeyClass instance for ranking id: ${requestedId}`, id);
+						send400(res, {
+							message: 'Invalid ranking data for aggregation.',
+							errorCode: 'WDxxx', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+						});
+						return;
+					}
+					const key = keyInstance.rankingDocumentKey();
+					if (!key) {
+						warn(`Unable to determine rootKey for ranking id: ${requestedId}`, id);
+						send500(res, {
+							message: 'Unable to determine root key for ranking aggregation.',
+							errorCode: 'WDxxx', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+						});
+						return;
+					}
+					rootType = 'ranking';
+					rootKey = key;
+					break;
+				case 'staff':
+					const { queryForStaffAggregationDoc } = require('../pipelines/staff/staffAggregationPipeline.js');
+					const staffQuery = queryForStaffAggregationDoc(
+						r?._externalSportsPersonId,
+						r?._externalSportsPersonIdScope,
+						r?._externalTeamId,
+						r?._externalTeamIdScope,
+						r?._externalClubId,
+						r?._externalClubIdScope,
+						r?._externalNationId,
+						r?._externalNationIdScope
+					);
+					if (!staffQuery?.externalKey) {
+						warn(`Unable to determine rootKey for staff id: ${requestedId}`, id);
+						send500(res, {
+							message: 'Unable to determine root key for staff aggregation.',
+							errorCode: 'WDxxx', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+						});
+						return;
+					}
+					rootType = 'staff';
+					rootKey = staffQuery.externalKey;
+					break;
+				case 'keymoment':
+					const { queryForKeyMomentAggregationDoc } = require('../pipelines/keyMoment/keyMomentAggregationPipeline.js');
+					const kmQuery = queryForKeyMomentAggregationDoc(r?._externalEventId, r?._externalEventIdScope, r?.type, r?.subType, r?.dateTime);
+					if (!kmQuery?.externalKey) {
+						warn(`Unable to determine rootKey for keyMoment id: ${requestedId}`, id);
+						send500(res, {
+							message: 'Unable to determine root key for keyMoment aggregation.',
+							errorCode: 'WDxxx', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+						});
+						return;
+					}
+					rootType = 'keyMoment';
+					rootKey = kmQuery.externalKey;
+					break;
+				default:
+					warn(`Aggregation not supported for resourceType: ${resourceType}`, id);
+					send200(res, r);
+					return;
+			}
+
+			const clientAggregationPipelineRouteBuilder = require('../client/clientAggregationPipelineRouteBuilder.js');
+			const clientAggregationPipelineBuilder = require('../client/clientAggregationPipelineBuilder.js');
+			const routes = clientAggregationPipelineRouteBuilder({ rootType, includeTypes: aggregationViews.split(','), edgeIds: aggregationEdges.split(',') });
+			const pipelineConfig = { rootType, rootExternalKey: rootKey, totalMax: aggregationMax, routes, includeTypes: aggregationViews.split(',') };
+			const pipeline = clientAggregationPipelineBuilder(pipelineConfig);
+			const a = await mongo.db
+				.collection(config?.matAggCollectionName || 'materialisedAggregations')
+				.aggregate(pipeline)
+				.toArray();
+			//////////////////////////////////////////////////////////////////////////
+			// Validate aggregation result
+			if (!a || a.length === 0 || !a[0]?.results) {
+				send500(res, {
+					message: `Error fetching data: no aggregation result returned`,
+					errorCode: 'WDxxx', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+					category: 'Database Query Error',
+				});
 				return;
 			}
-		} else {
+			const retDoc = {
+				requestedAggregationViews: aggregationViews.split(','),
+				requestedAggregationEdges: aggregationEdges.split(','),
+				requestedAggregationMax: aggregationMax,
+			};
+			let totalCount = 0;
+			const API_URL = config.express.fullHostUrl + `${req.params.apiVersion || '1-0'}/${schemaType}`;
+			const results = a[0].results;
+			const aggregations = {};
+			//////////////////////////////////////////////////////////////////////////
+			// Create the output aggregations document
+			for (const key in results) {
+				aggregations[key] = {};
+				aggregations[key].items = [];
+				aggregations[key].nextPages = [];
+				////////////////////////////////////////////////////////////////////////
+				// Process materialised into the aggregations object
+				if (Array.isArray(results[key]?.items)) {
+					totalCount += results[key].items.length;
+					for (const item of results[key].items) {
+						if (item._original && req.query.includeOriginal !== true && req.query.includeOriginal !== 'true') delete item._original;
+						if (item._stickies && req.query.includeStickies !== true && req.query.includeStickies !== 'true') delete item._stickies;
+						aggregations[key].items.push(item);
+					}
+				}
+				////////////////////////////////////////////////////////////////////////
+				// Process overflow IDs into next page query strings
+				let extraQueryStrings = ``;
+				if (req.query.includeOriginal === true || req.query.includeOriginal === 'true') extraQueryStrings += `&includeOriginal=true`;
+				if (req.query.includeStickies === true || req.query.includeStickies === 'true') extraQueryStrings += `&includeStickies=true`;
+				if (Array.isArray(results[key]?.overflow?.overflowIds)) {
+					totalCount += results[key].overflow.overflowIds.length;
+					results[key].overflow.nextPages = [];
+					for (const chunk of chunkAndFormatObjectIDs(results[key].overflow.overflowIds, aggregationMax)) {
+						if (chunk.length > 0) aggregations[key].nextPages.push(`${API_URL}?query=(or ${chunk})${extraQueryStrings}`);
+					}
+				}
+			}
+
+			retDoc.totalCount = totalCount;
+			retDoc.rootDocument = r;
+			retDoc.aggregations = aggregations;
+			retDoc.builtAggregationConfig = pipelineConfig;
+			info(`Aggregation completed with ${totalCount} aggregated resources`, id);
+			send200(res, retDoc);
+			return;
+		}
+		////////////////////////////////////////////////////////////////////////////
+		// We are not attempting an aggregation
+		else {
 			info(`No aggregation requested, returning raw data`, id);
-			// TODO: add other standard processing here
 			send200(res, r);
 			return;
 		}
-
-		send200(res, r);
-		return;
 	} catch (e) {
+		//////////////////////////////////////////////////////////////////////////////
+		// Catch any DB query errors
 		warn(`Error fetching single sports data for schemaType: ${schemaType}, scope: ${scope}, id: ${requestedId} - ${e.message}`, 'WD0060', 500, 'Database Query Error');
 		send500(res, {
 			message: `Error fetching data: ${e.message}`,
@@ -135,212 +295,28 @@ async function getSingleSportsData(req, res) {
 		return;
 	}
 }
-
 ////////////////////////////////////////////////////////////////////////////////
-const pipelineLookupCompetitionStages = {
-	$lookup: {
-		from: 'stages',
-		let: {
-			compScope: '$_externalIdScope',
-			compId: '$_externalId',
-		},
-		pipeline: [
-			{
-				$match: {
-					$expr: {
-						$and: [{ $eq: ['$_externalCompetitionIdScope', '$$compScope'] }, { $eq: ['$_externalCompetitionId', '$$compId'] }],
-					},
-				},
-			},
-			////////////////////////////////////////////////////////////////////////
-			// Project only the required fields for stages
-			{
-				$project: {
-					_id: 1,
-					_externalIdScope: 1,
-					_externalId: 1,
-				},
-			},
-		],
-		as: '_aggregation.stages',
-	},
-};
-////////////////////////////////////////////////////////////////////////////////
-const pipelineLookupStageEvents = {
-	$lookup: {
-		from: 'events',
-		let: { stageScope: '$_externalIdScope', stageId: '$_externalId' },
-		pipeline: [
-			{
-				$match: {
-					$expr: {
-						$and: [{ $eq: ['$_externalStageIdScope', '$$stageScope'] }, { $eq: ['$_externalStageId', '$$stageId'] }],
-					},
-				},
-			},
-			////////////////////////////////////////////////////////////////////////
-			// Project only the required fields for events
-			{
-				$project: {
-					_id: 1,
-					_externalIdScope: 1,
-					_externalId: 1,
-					_externalVenueIdScope: 1,
-					_externalVenueId: 1,
-				},
-			},
-		],
-		as: '_aggregation.events',
-	},
-};
-////////////////////////////////////////////////////////////////////////////////
-const pipelineLookupEventVenues = {
-	$lookup: {
-		from: 'venues',
-		let: { venueScope: '$_externalVenueIdScope', venueId: '$_externalVenueId' },
-		pipeline: [
-			{
-				$match: {
-					$expr: {
-						$and: [{ $eq: ['$_externalIdScope', '$$venueScope'] }, { $eq: ['$_externalId', '$$venueId'] }],
-					},
-				},
-			},
-			////////////////////////////////////////////////////////////////////////
-			// Project only the required fields for venues
-			{
-				$project: {
-					_id: 1,
-					_externalIdScope: 1,
-					_externalId: 1,
-				},
-			},
-		],
-		as: '_aggregation.venues',
-	},
-};
-////////////////////////////////////////////////////////////////////////////////
-const pipelineLookupEventKeyMoments = {
-	$lookup: {
-		from: 'keyMoments',
-		let: { eventScope: '$_externalIdScope', eventId: '$_externalId' },
-		pipeline: [
-			{
-				$match: {
-					$expr: {
-						$and: [{ $eq: ['$_externalEventIdScope', '$$eventScope'] }, { $eq: ['$_externalEventId', '$$eventId'] }],
-					},
-				},
-			},
-			{
-				$project: {
-					_id: 1,
-				},
-			},
-		],
-		as: '_aggregation.keyMoments',
-	},
-};
-
-////////////////////////////////////////////////////////////////////////////////
-// Manages: cs,se[.ev],ekm pipeline
-// WARNING: Probably remove EKM from the pipeline as it will be too much data
-async function ManageCSAggregationPipeline(competitionIdScope, competitionId, aggregationsSet, aggregationString) {
-	if (!aggregationsSet.has(`cs`)) return null;
-	const pipelineParts = {};
-	///////////////////////////////////////////////////////////////////////////////
-	pipelineParts.init = {
-		$match: {
-			_externalIdScope: competitionIdScope,
-			_externalId: competitionId,
-		},
-	};
-	///////////////////////////////////////////////////////////////////////////////
-	// Lookup all stages that reference this competition
-	pipelineParts.lookupStages = _.cloneDeep(pipelineLookupCompetitionStages);
+/**
+ * Splits an array of MongoDB ObjectIDs into chunks and formats them as query strings
+ * @param {Array} objectIdArray - Array of MongoDB ObjectIDs
+ * @param {number} maxSize - Maximum size for each chunk
+ * @returns {Array<string>} Array of formatted query strings
+ */
+function chunkAndFormatObjectIDs(objectIdArray, maxSize) {
+	if (!Array.isArray(objectIdArray) || objectIdArray.length === 0) return [];
+	if (!maxSize || maxSize <= 0) throw new Error('aggregationMax must be a positive number');
+	const chunks = [];
 	//////////////////////////////////////////////////////////////////////////////
-	// Lookup all events that reference these stages - do we hve se join?
-	if (aggregationsSet.has('se')) {
-		pipelineParts.lookupStageEvents = _.cloneDeep(pipelineLookupStageEvents);
-		pipelineParts.lookupStages.$lookup.pipeline.push(pipelineParts.lookupStageEvents);
-	}
-	////////////////////////////////////////////////////////////////////////////////
-	// If we don't have se join, we can't do anything else - return what we have
-	else {
-		writeFileSyncWithDirs(`${config.cwd}/scratch/pipeline.${aggregationString}.jsonc`, JSON.stringify([pipelineParts.init, pipelineParts.lookupStages], null, 2));
-		return [pipelineParts.init, pipelineParts.lookupStages];
+	// Split array into chunks
+	for (let i = 0; i < objectIdArray.length; i += maxSize) {
+		const chunk = objectIdArray.slice(i, i + maxSize);
+		////////////////////////////////////////////////////////////////////////////
+		// Convert each ObjectID to the formatted string
+		const formattedChunk = chunk.map((objectId) => `_id==\`${objectId.toString()}\``).join(' ');
+		chunks.push(formattedChunk);
 	}
 	//////////////////////////////////////////////////////////////////////////////
-	// We have an se join - do we have ev or ekm joins?
-	//////////////////////////////////////////////////////////////////////////////
-	// Lookup all venues for the events - do we have ev join?
-	if (aggregationsSet.has('se') && aggregationsSet.has('ev')) {
-		pipelineParts.lookupEventVenues = _.cloneDeep(pipelineLookupEventVenues);
-		pipelineParts.lookupStageEvents.$lookup.pipeline.push(pipelineParts.lookupEventVenues);
-	}
-	//////////////////////////////////////////////////////////////////////////////
-	// Remove the _externalVenueIdScope and _externalVenueId from the events projection
-	else {
-		const eventProjection = pipelineParts.lookupStageEvents.$lookup.pipeline.find((p) => p.$project);
-		if (eventProjection) {
-			delete eventProjection.$project._externalVenueIdScope;
-			delete eventProjection.$project._externalVenueId;
-		}
-	}
-	//////////////////////////////////////////////////////////////////////////////
-	// Lookup all key moments for the events - do we have km join?
-	if (aggregationsSet.has('se') && aggregationsSet.has('ekm')) {
-		pipelineParts.lookupEventKeyMoments = _.cloneDeep(pipelineLookupEventKeyMoments);
-		pipelineParts.lookupStageEvents.$lookup.pipeline.push(pipelineParts.lookupEventKeyMoments);
-	}
-
-	//////////////////////////////////////////////////////////////////////////////
-	// All done. Return the pipeline
-	//////////////////////////////////////////////////////////////////////////////
-	writeFileSyncWithDirs(`${config.cwd}/scratch/pipeline.${aggregationString}.jsonc`, JSON.stringify([pipelineParts.init, pipelineParts.lookupStages], null, 2));
-	return [pipelineParts.init, pipelineParts.lookupStages];
-}
-
-////////////////////////////////////////////////////////////////////////////////
-async function ManageCSAggregation(mongo, aggregationsSet, competitionDocument, aggregationString, requestId) {
-	if (!aggregationsSet.has(`cs`)) return null; // No CS aggregation requested
-	const competitionIdScope = competitionDocument._externalIdScope;
-	const competitionId = competitionDocument._externalId;
-	if (!competitionIdScope || !competitionId) {
-		warn(`Cannot perform CS aggregation as competition document is missing _externalIdScope or _externalId`, requestId);
-		return null;
-	}
-	//////////////////////////////////////////////////////////////////////////////
-	const pipeline = await ManageCSAggregationPipeline(competitionIdScope, competitionId, aggregationsSet, aggregationString);
-	if (!pipeline) return null;
-	// Start timing
-	const startTime = process.hrtime.bigint();
-	debug(`Started Aggregation Pipeline for ${aggregationString}`, requestId);
-	const result = await mongo.db.collection('competitions').aggregate(pipeline).toArray();
-	// End timing and calculate duration
-	const endTime = process.hrtime.bigint();
-	const durationMs = Number(endTime - startTime) / 1_000_000; // Convert nanoseconds to milliseconds
-	debug(`Finished Aggregation Pipeline for ${aggregationString} in ${durationMs.toFixed(2)}ms`, requestId);
-	const stageIds = new Set();
-	const eventIds = new Set();
-	//////////////////////////////////////////////////////////////////////////////
-	// Get competition stages
-	for (const doc of result) {
-		if (!Array.isArray(doc._aggregation?.cs)) continue;
-		for (const stage of doc._aggregation.cs) {
-			stageIds.add(stage);
-		}
-	}
-	//////////////////////////////////////////////////////////////////////////////
-	// Get Stage Events
-	for (const stage of stageIds) {
-		if (Array.isArray(stage?._aggregation?.se)) {
-			for (const event of stage._aggregation.se) {
-				eventIds.add(event);
-			}
-		}
-	}
-	return result;
+	return chunks;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

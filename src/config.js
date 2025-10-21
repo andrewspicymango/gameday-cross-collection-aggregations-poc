@@ -24,6 +24,7 @@ module.exports = {
 	},
 	express: {
 		port: process.env.EXPRESS_PORT || 8080,
+		fullHostUrl: process.env.API_URL || 'http://localhost:8080/',
 	},
 	serviceName: process.env.SERVICE_NAME || 'MTPage Service',
 };

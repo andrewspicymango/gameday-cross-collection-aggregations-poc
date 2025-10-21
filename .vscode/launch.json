@@ -25,8 +25,18 @@
 				"AGG_BASE": "http://localhost:8080/1-0/aggregate"
 			},
 			"outputCapture": "std"
+		},
+		{
+			"type": "node",
+			"request": "launch",
+			"name": "Mongo Query Test",
+			"skipFiles": ["<node_internals>/**"],
+			"program": "${workspaceFolder}/src/utils/mongoQuery.js",
+			"outFiles": ["${workspaceFolder}/**/*.js"],
+			"args": []
 		}
 
 		//src/pipelines/pipelineBuilder.js
+		// src/utils/mongoQuery.js
 	]
 }

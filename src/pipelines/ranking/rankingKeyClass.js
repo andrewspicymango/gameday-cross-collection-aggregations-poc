@@ -58,6 +58,16 @@ class RankingKeyClass {
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
+	rankingDocumentKey() {
+		const rankingType = this.type();
+		if (rankingType === 'stageTeamRanking') return this.rankingStageTeamHelpers().key;
+		if (rankingType === 'stageSportsPersonRanking') return this.rankingStageSportsPersonHelpers().key;
+		if (rankingType === 'eventTeamRanking') return this.rankingEventTeamHelpers().key;
+		if (rankingType === 'eventSportsPersonRanking') return this.rankingEventSportsPersonHelpers().key;
+		return null;
+	}
+
+	//////////////////////////////////////////////////////////////////////////////
 	rankingDocumentQuery() {
 		const rankingType = this.type();
 		if (rankingType === 'stageTeamRanking') return this.rankingStageTeamHelpers().query;

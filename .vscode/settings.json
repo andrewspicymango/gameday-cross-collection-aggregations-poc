@@ -81,5 +81,6 @@
 		"revealOn": "run",
 		"revealWithFocus": "test-results",
 		"clearOnRun": "none"
-	}
+	},
+	"jest.runMode": "on-demand"
 }
