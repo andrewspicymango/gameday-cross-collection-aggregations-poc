@@ -46,7 +46,6 @@ function clientAggregationPipelineRouteBuilder({
 	//////////////////////////////////////////////////////////////////////////////
 	// 1) Normalise and validate input edges against EDGES (silently drop invalids)
 	const processedEdgeIds = buildEdgeIds(edgeIds); // e.g. ['competition.stages->stage', ...]
-	console.log(processedEdgeIds);
 	const allowed = buildAllowedEdgeMap(processedEdgeIds, EDGES_FOR_PIPELINE); // { from: { field: to } }
 
 	//////////////////////////////////////////////////////////////////////////////
