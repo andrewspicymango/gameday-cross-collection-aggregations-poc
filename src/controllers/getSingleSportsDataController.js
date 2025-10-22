@@ -2,10 +2,12 @@ const _ = require(`lodash`);
 const uuid = require('uuid');
 const { keySeparator } = require('../pipelines/constants');
 const { send200, send400, send404, send500 } = require('../utils/httpResponseUtils');
+const clientAggregationPipelineRouteBuilder = require('../client/clientAggregationPipelineRouteBuilder.js');
+const clientAggregationPipelineBuilder = require('../client/clientAggregationPipelineBuilder.js');
+const { ClientAggregationError, ServerAggregationError } = require('../client/clientAggregationError.js');
+
 const { debug, info, warn } = require('../log.js');
 const config = require('../config.js');
-
-const { writeFileSyncWithDirs } = require(`../utils/fileUtils.js`);
 const maxMaterialisedResources = 50;
 
 // curl localhost:8080/1-0/competitions/bblapi/2023:BBL
@@ -110,8 +112,9 @@ async function getSingleSportsData(req, res) {
 		let aggregationMax = req.query?.aggregationMax ? parseInt(req.query.aggregationMax, 10) : maxMaterialisedResources;
 		if (isNaN(aggregationMax) || aggregationMax < 0 || aggregationMax > maxMaterialisedResources) aggregationMax = maxMaterialisedResources;
 		////////////////////////////////////////////////////////////////////////////
-		// We are attempting an aggregation
-		if (aggregationViews && aggregationEdges && aggregationViews.length > 0 && aggregationEdges.length > 0) {
+		// We are attempting an aggregation. views are mandatory, edges are optional and can be attempted to be calculated.
+		// Max number defaults to 50 if not provided or invalid.
+		if (aggregationViews && aggregationViews.length > 0) {
 			info(`Aggregation requested: views=${aggregationViews}, edges=${aggregationEdges}, max=${aggregationMax}`, id);
 			let rootKey = null;
 			let rootType = null;
@@ -223,24 +226,33 @@ async function getSingleSportsData(req, res) {
 				if (key.startsWith('projection.')) {
 					const field = key.replace('projection.', '');
 					fieldProjections.inclusions[field] = value.split(',').reduce((acc, curr) => {
-						acc[curr.trim()] = 1;
+						const trimmed = curr.trim();
+						if (trimmed) acc[trimmed] = 1;
 						return acc;
 					}, {});
 				}
 				if (key.startsWith('projection~')) {
 					const field = key.replace('projection~', '');
 					fieldProjections.exclusions[field] = value.split(',').reduce((acc, curr) => {
-						acc[curr.trim()] = 0;
+						const trimmed = curr.trim();
+						if (trimmed) acc[trimmed] = 0;
 						return acc;
 					}, {});
 				}
 			}
 
 			//////////////////////////////////////////////////////////////////////////
-			const clientAggregationPipelineRouteBuilder = require('../client/clientAggregationPipelineRouteBuilder.js');
-			const clientAggregationPipelineBuilder = require('../client/clientAggregationPipelineBuilder.js');
-			const routes = clientAggregationPipelineRouteBuilder({ rootType, includeTypes: aggregationViews.split(','), edgeIds: aggregationEdges.split(',') });
-			const pipelineConfig = { rootType, rootExternalKey: rootKey, totalMax: aggregationMax, routes, includeTypes: aggregationViews.split(','), fieldProjections };
+			const routes = _.isString(aggregationEdges)
+				? clientAggregationPipelineRouteBuilder({ rootType, includeTypes: aggregationViews.split(','), edgeIds: aggregationEdges.split(',') })
+				: null;
+			const pipelineConfig = {
+				rootType,
+				rootExternalKey: rootKey,
+				maxNumberOfMaterialisedResources: aggregationMax,
+				routes,
+				resourceTypesToMaterialise: aggregationViews.split(','),
+				fieldProjections,
+			};
 			const pipeline = clientAggregationPipelineBuilder(pipelineConfig);
 			const a = await mongo.db
 				.collection(config?.matAggCollectionName || 'materialisedAggregations')
@@ -256,12 +268,9 @@ async function getSingleSportsData(req, res) {
 				});
 				return;
 			}
-			const retDoc = {
-				requestedAggregationViews: aggregationViews.split(','),
-				requestedAggregationEdges: aggregationEdges.split(','),
-				requestedAggregationMax: aggregationMax,
-			};
+			const retDoc = {};
 			let totalCount = 0;
+			let totalCountByType = {};
 			const API_URL = config.express.fullHostUrl + `${req.params.apiVersion || '1-0'}/${schemaType}`;
 			const results = a[0].results;
 			const aggregations = {};
@@ -274,7 +283,9 @@ async function getSingleSportsData(req, res) {
 				////////////////////////////////////////////////////////////////////////
 				// Process materialised into the aggregations object
 				if (Array.isArray(results[key]?.items)) {
+					if (!totalCountByType[key]) totalCountByType[key] = 0;
 					totalCount += results[key].items.length;
+					totalCountByType[key] += results[key].items.length;
 					for (const item of results[key].items) {
 						if (item._original && req.query.includeOriginal !== true && req.query.includeOriginal !== 'true') delete item._original;
 						if (item._stickies && req.query.includeStickies !== true && req.query.includeStickies !== 'true') delete item._stickies;
@@ -287,20 +298,40 @@ async function getSingleSportsData(req, res) {
 				if (req.query.includeOriginal === true || req.query.includeOriginal === 'true') extraQueryStrings += `&includeOriginal=true`;
 				if (req.query.includeStickies === true || req.query.includeStickies === 'true') extraQueryStrings += `&includeStickies=true`;
 				if (Array.isArray(results[key]?.overflow?.overflowIds)) {
+					if (!totalCountByType[key]) totalCountByType[key] = 0;
+					totalCountByType[key] += results[key].overflow.overflowIds.length;
 					totalCount += results[key].overflow.overflowIds.length;
 					results[key].overflow.nextPages = [];
 					for (const chunk of chunkAndFormatObjectIDs(results[key].overflow.overflowIds, aggregationMax)) {
-						if (chunk.length > 0) aggregations[key].nextPages.push(`${API_URL}?query=(or ${chunk})${extraQueryStrings}`);
+						const formattedChunk = chunk.map((objectId) => `_id==\`${objectId.toString()}\``).join(' ');
+						////////////////////////////////////////////////////////////////////
+						// The chunk has more than one reference, so we need to use an 'or' query
+						if (chunk.length > 1) {
+							aggregations[key].nextPages.push(`${API_URL}?query=(or ${formattedChunk})${extraQueryStrings}`);
+						}
+						////////////////////////////////////////////////////////////////////
+						else if (chunk.length == 1) {
+							aggregations[key].nextPages.push(`${API_URL}?query=${formattedChunk}${extraQueryStrings}`);
+						}
 					}
 				}
 			}
 
+			retDoc.results = aggregations;
 			retDoc.totalCount = totalCount;
-			retDoc.rootDocument = r;
-			retDoc.aggregations = aggregations;
+			retDoc.totalCountByType = totalCountByType;
+			retDoc.requestedAggregationViews = aggregationViews.split(',');
+			retDoc.requestedAggregationEdges = aggregationEdges ? aggregationEdges.split(',') : null;
+			retDoc.requestedAggregationMax = aggregationMax;
 			retDoc.builtAggregationConfig = pipelineConfig;
 			info(`Aggregation completed with ${totalCount} aggregated resources`, id);
 			send200(res, retDoc);
+			return;
+		}
+		////////////////////////////////////////////////////////////////////////////
+		else if (aggregationEdges && !aggregationViews) {
+			warn(`Incomplete aggregation parameters provided, no aggregation performed. Must provide aggregation views`, id);
+			send400(res, r);
 			return;
 		}
 		////////////////////////////////////////////////////////////////////////////
@@ -312,13 +343,39 @@ async function getSingleSportsData(req, res) {
 		}
 	} catch (e) {
 		//////////////////////////////////////////////////////////////////////////////
-		// Catch any DB query errors
-		warn(`Error fetching single sports data for schemaType: ${schemaType}, scope: ${scope}, id: ${requestedId} - ${e.message}`, 'WD0060', 500, 'Database Query Error');
-		send500(res, {
-			message: `Error fetching data: ${e.message}`,
-			errorCode: 'WDxxx', // TODO: Error codes should be documented in a central location and not as magic numbers in code
-			category: 'Database Query Error',
-		});
+		if (e instanceof ClientAggregationError) {
+			warn(
+				`Client aggregation error fetching single sports data for schemaType: ${schemaType}, scope: ${scope}, id: ${requestedId} - ${e.message}`,
+				'WDxxx',
+				400,
+				'Client Aggregation Error'
+			);
+			if (_.has(e, 'details')) {
+				send400(res, {
+					message: `Error fetching data: ${e.message}`,
+					errorCode: 'WDxxx', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+					category: 'Client Aggregation Error',
+					details: e.details,
+				});
+			} else {
+				send400(res, {
+					message: `Error fetching data: ${e.message}`,
+					errorCode: 'WDxxx', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+					category: 'Client Aggregation Error',
+				});
+			}
+			return;
+		} else {
+			//////////////////////////////////////////////////////////////////////////////
+			// Catch any DB query errors
+			warn(`Error fetching single sports data for schemaType: ${schemaType}, scope: ${scope}, id: ${requestedId} - ${e.message}`, 'WD0060', 500, 'Database Query Error');
+			send500(res, {
+				message: `Error fetching data: ${e.message}`,
+				errorCode: 'WDxxx', // TODO: Error codes should be documented in a central location and not as magic numbers in code
+				category: 'Database Query Error',
+			});
+		}
+
 		return;
 	}
 }
@@ -339,8 +396,10 @@ function chunkAndFormatObjectIDs(objectIdArray, maxSize) {
 		const chunk = objectIdArray.slice(i, i + maxSize);
 		////////////////////////////////////////////////////////////////////////////
 		// Convert each ObjectID to the formatted string
-		const formattedChunk = chunk.map((objectId) => `_id==\`${objectId.toString()}\``).join(' ');
-		chunks.push(formattedChunk);
+		const chunkRefs = [];
+		for (const ref of chunk) chunkRefs.push(ref.toString());
+		// const formattedChunk = chunk.map((objectId) => `_id==\`${objectId.toString()}\``).join(' ');
+		chunks.push(chunkRefs);
 	}
 	//////////////////////////////////////////////////////////////////////////////
 	return chunks;

@@ -8,8 +8,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 	const basicRoutes = {
 		rootType: 'competition',
 		rootExternalKey: '289175 @ fifa',
-		totalMax: 20,
-		includeTypes: ['stage', 'sgo'],
+		maxNumberOfMaterialisedResources: 20,
+		resourceTypesToMaterialise: ['stage', 'sgo'],
 		routes: [
 			{ key: 'directStages', to: 'stage', via: ['competition.stages->stage'] },
 			{ key: 'directSgos', to: 'sgo', via: ['competition.sgos->sgo'] },
@@ -19,8 +19,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 	const multiHopRoutes = {
 		rootType: 'competition',
 		rootExternalKey: '289175 @ fifa',
-		totalMax: 50,
-		includeTypes: ['team', 'venue', 'sportsPerson', 'staff'],
+		maxNumberOfMaterialisedResources: 50,
+		resourceTypesToMaterialise: ['team', 'venue', 'sportsPerson', 'staff'],
 		routes: [
 			{
 				key: 'teamsViaStagesAndEvents',
@@ -48,8 +48,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 	const sharedHopRoutes = {
 		rootType: 'competition',
 		rootExternalKey: '289175 @ fifa',
-		totalMax: 30,
-		includeTypes: ['team', 'venue', 'ranking'],
+		maxNumberOfMaterialisedResources: 30,
+		resourceTypesToMaterialise: ['team', 'venue', 'ranking'],
 		routes: [
 			{
 				key: 'teamsViaEvents',
@@ -77,8 +77,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 	const unionRoutes = {
 		rootType: 'competition',
 		rootExternalKey: '289175 @ fifa',
-		totalMax: 25,
-		includeTypes: ['team', 'sgo'],
+		maxNumberOfMaterialisedResources: 25,
+		resourceTypesToMaterialise: ['team', 'sgo'],
 		routes: [
 			{
 				key: 'teamsViaEvents',
@@ -106,8 +106,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 	const unionRoutesWithMax4 = {
 		rootType: 'competition',
 		rootExternalKey: '289175 @ fifa',
-		totalMax: 25,
-		includeTypes: ['team', 'sgo'],
+		maxNumberOfMaterialisedResources: 25,
+		resourceTypesToMaterialise: ['team', 'sgo'],
 		routes: [
 			{
 				key: 'teamsViaEvents',
@@ -135,8 +135,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 	const budgetTestRoutes = {
 		rootType: 'competition',
 		rootExternalKey: '289175 @ fifa',
-		totalMax: 5, // Intentionally small to test overflow
-		includeTypes: ['stage', 'event', 'team', 'venue'],
+		maxNumberOfMaterialisedResources: 5, // Intentionally small to test overflow
+		resourceTypesToMaterialise: ['stage', 'event', 'team', 'venue'],
 		routes: [
 			{
 				key: 'stages',
@@ -164,8 +164,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 	const teamRootRoutes = {
 		rootType: 'team',
 		rootExternalKey: 'team123 @ fifa',
-		totalMax: 15,
-		includeTypes: ['event', 'club', 'sportsPerson', 'venue'],
+		maxNumberOfMaterialisedResources: 15,
+		resourceTypesToMaterialise: ['event', 'club', 'sportsPerson', 'venue'],
 		routes: [
 			{
 				key: 'eventsForTeam',
@@ -193,8 +193,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 	const deepRoutes = {
 		rootType: 'competition',
 		rootExternalKey: '289175 @ fifa',
-		totalMax: 40,
-		includeTypes: ['club', 'nation', 'keyMoment'],
+		maxNumberOfMaterialisedResources: 40,
+		resourceTypesToMaterialise: ['club', 'nation', 'keyMoment'],
 		routes: [
 			{
 				key: 'clubsViaTeams',
@@ -315,8 +315,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 			const nonContiguousConfig = {
 				rootType: 'competition',
 				rootExternalKey: 'test',
-				totalMax: 10,
-				includeTypes: ['team'],
+				maxNumberOfMaterialisedResources: 10,
+				resourceTypesToMaterialise: ['team'],
 				routes: [
 					{
 						key: 'badRoute',
@@ -334,8 +334,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 			const invalidFieldConfig = {
 				rootType: 'competition',
 				rootExternalKey: 'test',
-				totalMax: 10,
-				includeTypes: ['stage'],
+				maxNumberOfMaterialisedResources: 10,
+				resourceTypesToMaterialise: ['stage'],
 				routes: [
 					{
 						key: 'badField',
@@ -353,8 +353,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 			const cyclicConfig = {
 				rootType: 'sgo',
 				rootExternalKey: 'test',
-				totalMax: 10,
-				includeTypes: ['sgo'],
+				maxNumberOfMaterialisedResources: 10,
+				resourceTypesToMaterialise: ['sgo'],
 				routes: [
 					{
 						key: 'cyclicRoute',
@@ -372,8 +372,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 			const wrongDestinationConfig = {
 				rootType: 'competition',
 				rootExternalKey: 'test',
-				totalMax: 10,
-				includeTypes: ['team'],
+				maxNumberOfMaterialisedResources: 10,
+				resourceTypesToMaterialise: ['team'],
 				routes: [
 					{
 						key: 'wrongDestination',
@@ -392,8 +392,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 			const incompleteConfig = {
 				rootType: 'competition',
 				// Missing rootExternalKey
-				totalMax: 10,
-				includeTypes: ['stage'],
+				maxNumberOfMaterialisedResources: 10,
+				resourceTypesToMaterialise: ['stage'],
 				routes: [],
 			};
 
@@ -406,8 +406,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 			const invalidRouteConfig = {
 				rootType: 'competition',
 				rootExternalKey: 'test',
-				totalMax: 10,
-				includeTypes: ['stage'],
+				maxNumberOfMaterialisedResources: 10,
+				resourceTypesToMaterialise: ['stage'],
 				routes: [
 					{
 						// Missing 'key' property
@@ -426,8 +426,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 			const emptyRoutesConfig = {
 				rootType: 'competition',
 				rootExternalKey: 'test',
-				totalMax: 10,
-				includeTypes: [],
+				maxNumberOfMaterialisedResources: 10,
+				resourceTypesToMaterialise: [],
 				routes: [],
 			};
 			expect(() => {
@@ -485,8 +485,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 			const zeroBudgetConfig = {
 				rootType: 'competition',
 				rootExternalKey: 'test',
-				totalMax: 0,
-				includeTypes: ['stage'],
+				maxNumberOfMaterialisedResources: 0,
+				resourceTypesToMaterialise: ['stage'],
 				routes: [
 					{
 						key: 'stages',
@@ -505,8 +505,8 @@ describe('Client Aggregation Pipeline Builder', () => {
 			const manyRoutesConfig = {
 				rootType: 'competition',
 				rootExternalKey: 'test',
-				totalMax: 100,
-				includeTypes: ['stage', 'event', 'team'],
+				maxNumberOfMaterialisedResources: 100,
+				resourceTypesToMaterialise: ['stage', 'event', 'team'],
 				routes: Array(1000)
 					.fill(null)
 					.map((_, i) => ({
