@@ -1,0 +1,18 @@
+sequenceDiagram
+  autonumber
+  actor Client as API Client
+  participant API as API Service
+  participant MatAgg as materialisedAggregations
+  participant Mongo as MongoDB (Core Collections)
+  participant Edges as EDGES Rules
+  participant Cache as Redis (future)
+
+  Client->>API: GET /{type}/{scope}/{id}?aggregationViews=...&aggregationMax=...
+  API->>Edges: Validate or derive traversal paths
+  API->>MatAgg: Read aggregation docs for root + target types
+  MatAgg-->>API: Return { targetType: [ids...] }
+  API->>Mongo: Fetch root resource
+  API->>Mongo: Fetch related documents (up to limit)
+  Mongo-->>API: Return documents
+  API->>API: Apply projections and build response structure
+  API-->>Client: Aggregated response (materialised + references + metadata)

@@ -1,0 +1,20 @@
+sequenceDiagram
+  autonumber
+  actor Provider as External Provider
+  participant Ingest as Ingest Service
+  participant Pipelines as Aggregation Pipelines
+  participant Mongo as MongoDB (Core Collections)
+  participant MatAgg as materialisedAggregations
+
+  Provider->>Ingest: Send resource payload (create/update)
+  Ingest->>Mongo: Upsert resource
+  Ingest->>Ingest: Determine if new or changed
+  alt New or changed
+    Ingest->>Pipelines: Select pipeline for resourceType
+    Pipelines->>Mongo: Traverse defined edges
+    Mongo-->>Pipelines: Return related IDs
+    Pipelines->>MatAgg: $merge upsert aggregated document
+    MatAgg-->>Pipelines: Acknowledge write
+  else Unchanged
+    Ingest-->>Ingest: Skip materialisation
+  end
