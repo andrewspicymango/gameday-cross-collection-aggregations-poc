@@ -134,3 +134,4 @@ web_modules/
 *.tgz
 src/pipelines/ranking/example.json
 src/utils/mongoQuery.js
+Archive.zip
