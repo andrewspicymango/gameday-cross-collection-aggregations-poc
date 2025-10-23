@@ -1,0 +1,21 @@
+flowchart LR
+  subgraph EXT["External Systems"]
+    FE[Client Applications]
+  end
+
+  subgraph GAMEDAY["Gameday Platform"]
+    IN[Ingest Service]
+    API[API Service]
+    AGG[Cross Collection Aggregation Component]
+    MAT[(materialisedAggregations)]
+    MONGO[(Core Resource Collections)]
+    REDIS[(Redis Cache – future)]
+    FE -->|REST API Requests| API
+  end
+
+  IN -->|Detects resource changes| AGG
+  AGG -->|Pre-materialises 1-hop edges| MAT
+  API -->|Reads pre-materialised data| MAT
+  API -->|Fetches root & referenced docs| MONGO
+  API -->|Optionally cache responses| REDIS
+  API -->|Receives aggregated response| FE
