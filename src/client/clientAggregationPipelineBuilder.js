@@ -8,7 +8,7 @@ const idField = 'gamedayId';
 const aggregationCollectionName = 'materialisedAggregations';
 const EDGES = require('./clientAggregationPipelineBuilderEdges.js');
 const COLLECTIONS = require('./clientAggregationPipelineBuilderCollections.js');
-const { deriveRoutesFromTargets } = require('./clientAggregationDeriveRoutes.js');
+const deriveRoutesFromTargets = require('./clientAggregationDeriveRoutes.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -26,8 +26,6 @@ const { deriveRoutesFromTargets } = require('./clientAggregationDeriveRoutes.js'
  * @param {Array<Object>} [config.routes] - Route definitions with key, to, and via properties. Optional and auto created if absent.
  * @param {Array<string>} config.resourceTypesToMaterialise - Types to include in results (controls budget order)
  * @param {Object} [config.fieldProjections] - Field inclusion/exclusion mapping by resource type
- * @param {Object} [config.edges] - Graph edges defining resource relationships
- * @param {Object} [config.collectionMap] - Mapping of resource types to MongoDB collections
  * @returns {Array<Object>} MongoDB aggregation pipeline stages
  * @throws {ClientAggregationError} When validation fails or resources are unreachable
  */
@@ -38,33 +36,21 @@ function clientAggregationPipelineBuilder({
 	routes, // [{ key, to, via: ["from.field->to", ...] }, ...]  REQUIRED
 	resourceTypesToMaterialise, // ["team", "venue", ...] REQUIRED (controls materialisation + budget order)
 	fieldProjections,
-	edges,
-	collectionMap,
 }) {
 	//////////////////////////////////////////////////////////////////////////////
 	// Directed, field-labelled graph
-	const EDGES_FOR_PIPELINE = edges || EDGES;
+	const EDGES_FOR_PIPELINE = EDGES;
 
 	//////////////////////////////////////////////////////////////////////////////
 	// resourceType -> real collection (for final materialisation)
-	const COLLECTIONS_FOR_PIPELINE = collectionMap || COLLECTIONS;
-
-	let effectiveRoutes = routes;
-	if (!effectiveRoutes || effectiveRoutes.length === 0) {
-		effectiveRoutes = deriveRoutesFromTargets({
-			EDGES_MAP: EDGES_FOR_PIPELINE,
-			rootType,
-			targets: resourceTypesToMaterialise,
-			maxDepth: 8, // optional
-		});
-	}
+	const COLLECTIONS_FOR_PIPELINE = COLLECTIONS;
 
 	//////////////////////////////////////////////////////////////////////////////
 	// Validation
 	if (!rootType || !rootExternalKey) {
 		throw new Error('rootType and rootExternalKey are required');
 	}
-	if (!Array.isArray(effectiveRoutes) || effectiveRoutes.length === 0) {
+	if (!Array.isArray(routes) || routes.length === 0) {
 		throw new ClientAggregationError('routes must be a non-empty array of route definitions.');
 	}
 	if (!Array.isArray(resourceTypesToMaterialise) || resourceTypesToMaterialise.length === 0) {
@@ -97,7 +83,7 @@ function clientAggregationPipelineBuilder({
 
 	//////////////////////////////////////////////////////////////////////////////
 	// Parse routes strictly (throws on any non-contiguous / invalid hop, cycles, or duplicate edges)
-	const parsedRoutes = effectiveRoutes.map((r) => ({
+	const parsedRoutes = routes.map((r) => ({
 		key: r.key,
 		to: r.to,
 		path: parseExplicitRouteStrictNoCyclesNoDup({ EDGES: EDGES_FOR_PIPELINE, rootType, route: r }),
@@ -132,7 +118,7 @@ function clientAggregationPipelineBuilder({
 		throw new ClientAggregationError(
 			`Requested materialised type(s) are reachable in the graph but not traversed by any provided route: ${unreachableByRoutes.join(', ')}`,
 			'UNREACHABLE_BY_ROUTES',
-			{ rootType, unreachableByRoutes, calculatedRoutes: effectiveRoutes }
+			{ rootType, unreachableByRoutes, calculatedRoutes: routes }
 		);
 	}
 
@@ -143,7 +129,7 @@ function clientAggregationPipelineBuilder({
 	//////////////////////////////////////////////////////////////////////////////
 	// Build the aggregation pipeline
 	const stages = [{ $match: { resourceType: rootType, externalKey: rootExternalKey } }, { $addFields: { _rootKey: '$externalKey', _rootIds: [`$${idField}`] } }];
-
+	const stepsReport = steps.map((s) => ({ from: s.from, to: s.to, depth: s.depth }));
 	//////////////////////////////////////////////////////////////////////////////
 	// Traverse materialisedAggregations using planned steps
 	for (const step of steps) {
@@ -320,6 +306,7 @@ function clientAggregationPipelineBuilder({
 		$project: {
 			root: { type: { $literal: rootType }, externalKey: '$_rootKey' },
 			results: resultsProjection,
+			edgesUsed: stepsReport,
 		},
 	});
 	//////////////////////////////////////////////////////////////////////////////

@@ -1,5 +1,6 @@
 const { ClientAggregationError, ServerAggregationError } = require('./clientAggregationError.js');
 const COMP_SCOPED = new Set(['competition', 'stage', 'event', 'team', 'staff', 'ranking', 'keyMoment', 'keymoment']);
+const EDGES = require('./clientAggregationPipelineBuilderEdges.js');
 
 ////////////////////////////////////////////////////////////////////////////////
 /**
@@ -153,7 +154,7 @@ function pickBestPath(EDGES_MAP, rootType, targetType, opts) {
  * @returns {Array<{key: string, to: string, via: Array<string>}>} Array of route configurations
  * @throws {ClientAggregationError} When no valid path exists to a target type
  */
-function deriveRoutesFromTargets({ EDGES_MAP, rootType, targets, maxDepth = 6 }) {
+function deriveRoutesFromTargets({ rootType, targets, maxDepth = 6 }) {
 	const routes = [];
 	for (const to of targets) {
 		////////////////////////////////////////////////////////////////////////////
@@ -163,7 +164,7 @@ function deriveRoutesFromTargets({ EDGES_MAP, rootType, targets, maxDepth = 6 })
 			continue;
 		}
 		////////////////////////////////////////////////////////////////////////////
-		const path = pickBestPath(EDGES_MAP, rootType, to, { maxDepth });
+		const path = pickBestPath(EDGES, rootType, to, { maxDepth });
 		if (!path) throw new ClientAggregationError(`No valid scoped path from '${rootType}' to '${to}' under scope rules.`, 'UNREACHABLE_AUTO_ROUTE', { rootType, to });
 		routes.push({ key: `${to}_${path.length}hops`, to, via: path.map((h) => `${h.from}.${h.field}->${h.to}`) });
 	}
@@ -171,4 +172,4 @@ function deriveRoutesFromTargets({ EDGES_MAP, rootType, targets, maxDepth = 6 })
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-module.exports = { deriveRoutesFromTargets };
+module.exports = deriveRoutesFromTargets;

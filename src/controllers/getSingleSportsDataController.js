@@ -4,6 +4,8 @@ const { keySeparator } = require('../pipelines/constants');
 const { send200, send400, send404, send500 } = require('../utils/httpResponseUtils');
 const clientAggregationPipelineRouteBuilder = require('../client/clientAggregationPipelineRouteBuilder.js');
 const clientAggregationPipelineBuilder = require('../client/clientAggregationPipelineBuilder.js');
+const deriveRoutesFromTargets = require('../client/clientAggregationDeriveRoutes.js');
+
 const { ClientAggregationError, ServerAggregationError } = require('../client/clientAggregationError.js');
 
 const { debug, info, warn } = require('../log.js');
@@ -116,9 +118,22 @@ async function getSingleSportsData(req, res) {
 		// Max number defaults to 50 if not provided or invalid.
 		if (aggregationViews && aggregationViews.length > 0) {
 			info(`Aggregation requested: views=${aggregationViews}, edges=${aggregationEdges}, max=${aggregationMax}`, id);
+
 			let rootKey = null;
 			let rootType = null;
 			const resourceType = r?.resourceType ? r.resourceType.toLowerCase() : null;
+
+			//////////////////////////////////////////////////////////////////////////
+			// Black list certain views from certain routes
+			const viewsArrayLowerCase = aggregationViews
+				.split(',')
+				.map((v) => v.trim().toLowerCase())
+				.filter((v) => v.length > 0);
+			if (viewsArrayLowerCase.includes('keymoment') && resourceType.toLowerCase() !== 'event') {
+				send400(res, 'KeyMoment aggregation view can only be requested when the root resource is an Event.');
+				return;
+			}
+
 			//////////////////////////////////////////////////////////////////////////
 			// determine root document type and externalKey
 			switch (resourceType) {
@@ -242,15 +257,22 @@ async function getSingleSportsData(req, res) {
 			}
 
 			//////////////////////////////////////////////////////////////////////////
-			const routes = _.isString(aggregationEdges)
-				? clientAggregationPipelineRouteBuilder({ rootType, includeTypes: aggregationViews.split(','), edgeIds: aggregationEdges.split(',') })
-				: null;
+			const viewsArray = [
+				...new Set(
+					aggregationViews
+						.split(',')
+						.map((v) => v.trim())
+						.filter((v) => v.length > 0)
+				),
+			];
+			const routes = _.isString(aggregationEdges) ? clientAggregationPipelineRouteBuilder({ rootType, includeTypes: viewsArray, edgeIds: aggregationEdges.split(',') }) : null;
+			const constructedRoutes = routes == null || routes.length === 0 ? deriveRoutesFromTargets({ rootType, targets: viewsArray, maxDepth: 8 }) : routes;
 			const pipelineConfig = {
 				rootType,
 				rootExternalKey: rootKey,
 				maxNumberOfMaterialisedResources: aggregationMax,
-				routes,
-				resourceTypesToMaterialise: aggregationViews.split(','),
+				routes: constructedRoutes,
+				resourceTypesToMaterialise: viewsArray,
 				fieldProjections,
 			};
 			const pipeline = clientAggregationPipelineBuilder(pipelineConfig);
@@ -316,10 +338,13 @@ async function getSingleSportsData(req, res) {
 					}
 				}
 			}
-
+			//////////////////////////////////////////////////////////////////////////
+			pipelineConfig.nonNormalisedRoutes = pipelineConfig?.routes || null;
+			delete pipelineConfig.routes;
 			retDoc.results = aggregations;
 			retDoc.totalCount = totalCount;
 			retDoc.totalCountByType = totalCountByType;
+			retDoc.edgesUsed = a[0].edgesUsed ? a[0].edgesUsed : null;
 			retDoc.requestedAggregationViews = aggregationViews.split(',');
 			retDoc.requestedAggregationEdges = aggregationEdges ? aggregationEdges.split(',') : null;
 			retDoc.requestedAggregationMax = aggregationMax;
@@ -379,6 +404,7 @@ async function getSingleSportsData(req, res) {
 		return;
 	}
 }
+
 ////////////////////////////////////////////////////////////////////////////////
 /**
  * Splits an array of MongoDB ObjectIDs into chunks and formats them as query strings

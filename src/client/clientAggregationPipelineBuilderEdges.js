@@ -75,11 +75,11 @@ const EDGES = {
 	// ranking -> stage
 	// ranking -> team
 	// ranking -> sportsPerson
-	rankings: { events: 'event', stages: 'stage', teams: 'team', sportsPersons: 'sportsPerson' },
+	ranking: { events: 'event', stages: 'stage', teams: 'team', sportsPersons: 'sportsPerson' },
 	// keyMoment -> event
 	// keyMoment -> sportsPerson
 	// keyMoment -> team
-	keyMoments: { events: 'event', sportsPersons: 'sportsPerson', teams: 'team' },
+	keyMoment: { events: 'event', sportsPersons: 'sportsPerson', teams: 'team' },
 };
 
 module.exports = EDGES;
