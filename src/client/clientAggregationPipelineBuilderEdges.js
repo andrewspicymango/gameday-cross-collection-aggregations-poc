@@ -79,7 +79,7 @@ const EDGES = {
 	// keyMoment -> event
 	// keyMoment -> sportsPerson
 	// keyMoment -> team
-	keyMoment: { events: 'event', sportsPersons: 'sportsPerson', teams: 'team' },
+	keyMoments: { events: 'event', sportsPersons: 'sportsPerson', teams: 'team' },
 };
 
 module.exports = EDGES;
