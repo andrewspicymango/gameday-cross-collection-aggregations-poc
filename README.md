@@ -9,7 +9,7 @@
 - [5. Application Flow](#5-application-flow)
 - [6. Routes](#6-routes)
 - [7. Aggregation Behaviour](#7-aggregation-behaviour)
-- [8. Materialisation Process](#8-materialisation-process)
+- [8. Integration](#8-integration)
 - [9. MongoDB Schema and Indexing](#9-mongodb-schema-and-indexing)
 - [10. Configuration](#10-configuration)
 - [11. Logging and Error Handling](#11-logging-and-error-handling)
@@ -163,7 +163,7 @@ These traversal rules are enforced when building aggregation pipelines from the 
 
 ---
 
-## 8. Materialisation Process
+## 8. Integration
 
 ### Ingest Integration
 
@@ -172,11 +172,6 @@ When a resource is added or updated:
 1. The ingest service identifies changed resources.
 2. The appropriate pipeline from `src/pipelines` is executed.
 3. A pre-materialised aggregation document is written to `materialisedAggregations`.
-
-These aggregation documents contain:
-
-- The root resource type and key.
-- Lists of related document `_id` values grouped by type.
 
 ### API Integration
 
@@ -187,6 +182,41 @@ When a client requests a resource via the API:
 3. Optionally resolves and embeds referenced documents up to a defined limit.
 4. Returns a unified, aggregated response.
 
+### Integration into Gameday
+
+This proof of concept is intended to be integrated into two existing services in Gameday:
+
+ 1. Ingest Service. Pre-materialises one-hop edges whenever a resource is created or updated, writing documents to the materialisedAggregations collection.
+ 2. API Service. Uses the pre-materialised aggregation documents to assemble efficient cross-collection responses for clients, resolving referenced documents up to a configured limit.
+
+The goals are reduced query latency, predictable server load, and a consistent traversal of the EDGES graph.
+
+#### Work Packages for Integration
+
+The following work items group the main tasks needed to productionise and integrate this PoC.
+
+1. Ingest-side materialisation (depth 1)
+1. 1. Triggering: After create or update of any supported resource type, to Mongo, trigger a depth 1 aggregation build for that resource. This writes the aggregation doc to `materialisedAggregations` with the agreed shape
+1. 1. Indexing: Ensure the two unique indexes created at startup exist in all environments:
+1. 1. 1. `{ resourceType: 1, externalKey: 1 }`
+1. 1. 1. `{ resourceType: 1, gamedayId: 1 }`
+1. API-side aggregation assembly
+1. 1. Integrate PoC client side code into a GET request for a single resource.
+1. 1. 1. This builds the Mongo pipeline to read the relevant materialisedAggregations subsets, union and deduplicate references by targetType, then resolve documents from their home collections.
+1. 1. 1. It also applies inclusion and exclusion projections in the defined order, including participant and tag filters.
+1. 1. 1. Return 401, 403, 422, and 503 as per SOW when limits or policy are breached.
+1. Security and policy
+1. 1. There is a desire to make sure aggregations are available to authorised users only. Although the PoC does not include this functionality, the API server is required to implement authorisation checking for use of the aggregation pipeline functionality by using claims in the AIDC token.
+
+#### Cache strategy (future)
+
+- Redis keys: Define stable cache keys that reflect the root, requested views, projections, and limit.
+- Invalidation: On ingest update, determine the impacted aggregation keys and evict them. Start with coarse invalidation by root, then refine.
+
+#### Security and policy
+
+There is a desire to make sure aggregations are available to authorised users only. Although the PoC does not include this functionality, the API server is requiered
+
 ---
 
 ## 9. MongoDB Schema and Indexing
@@ -196,10 +226,10 @@ When a client requests a resource via the API:
 | Field | Description |
 |--------|-------------|
 | `resourceType` | Type of the root resource (e.g. `competition`, `event`). |
-| `_externalIdScope`, `_externalId` | Identify the external key of the root document. |
-| `targetType` | Aggregated resource type (e.g. `stages`, `events`, `teams`). |
-| `references` | Array of referenced document IDs. |
-| `updatedAt` | Timestamp of last aggregation. |
+| `externalKey`  | Identify the external key of the root document. |
+| `gamedayId`  | The Mongo _id for for the root resource |
+| `...<linkedResourceType>s` | An array of Mongo `_id` values for linked resources of that type (e.g. `stages` from a `competition` root resource) |
+| `...<linkedResourceType>Keys` | An object with the keys being the `externalKey` of the materialised aggregation for that linked resource and whose value is the Mongo `_id` values for linked resources of that type  (e.g. `stageKeys` from a `competition` root resource) |
 
 **Indexes created at startup**:
 
@@ -230,8 +260,6 @@ HTTP responses are normalised via utilities in `httpResponseUtils.js`:
 
 - Implement Redis cache invalidation when resources update.
 - Extend pre-materialisation to multiple hops (depth > 1).
-- Introduce pagination and rate limiting for client aggregations.
-- Replace Express development endpoints with production-ready API integration.
 - Add integration tests for edge traversal and performance benchmarking.
 
 ---
